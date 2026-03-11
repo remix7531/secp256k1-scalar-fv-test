@@ -6,9 +6,9 @@
  * Extracted from bitcoin-core/secp256k1 for formal verification with   *
  * Rocq / Verifiable C.                                                 *
  *                                                                      *
- * Scope: secp256k1_scalar_mul_512 only — the schoolbook 4-limb         *
- * multiply that produces an 8-limb 512-bit result.                     *
- * No __int128, no inline assembly, no modular reduction.               *
+ * Scope: secp256k1_scalar_mul:  schoolbook 4-limb multiply followed    *
+ * by modular folding reduction mod the secp256k1 group order.          *
+ * No __int128, no inline assembly.                                     *
  ***********************************************************************/
 
 #ifndef SECP256K1_SCALAR_4X64_H
@@ -22,14 +22,12 @@ typedef struct {
 } secp256k1_scalar;
 
 /**
- * Compute the full 512-bit product of two 256-bit scalars.
+ * Modular scalar multiplication.
  *
- *   l8[0..7]  =  a  *  b        (little-endian 64-bit limbs)
- *
- * This is the verification target.
+ *   r  =  a * b  (mod N)
  */
-void secp256k1_scalar_mul_512(uint64_t *l8,
-                              const secp256k1_scalar *a,
-                              const secp256k1_scalar *b);
+void secp256k1_scalar_mul(secp256k1_scalar *r,
+                          const secp256k1_scalar *a,
+                          const secp256k1_scalar *b);
 
 #endif /* SECP256K1_SCALAR_4X64_H */

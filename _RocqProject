@@ -1,0 +1,30 @@
+-Q proof scalar_4x64
+# Suppress "From Coq" deprecation from clightgen-generated Source file
+-arg -w -arg -deprecated-from-Coq
+
+proof/Helper_arithmetic.v
+proof/Source_scalar_4x64.v
+proof/Verif_imports.v
+proof/Helper_array_fold.v
+proof/Spec_scalar_4x64.v
+proof/Impl_scalar_4x64.v
+proof/Helper_verif.v
+proof/Verif_u128_to_u64.v
+proof/Verif_u128_hi_u64.v
+proof/Verif_umul128.v
+proof/Verif_u128_mul.v
+proof/Verif_muladd.v
+proof/Verif_muladd_fast.v
+proof/Verif_sumadd.v
+proof/Verif_sumadd_fast.v
+proof/Verif_extract.v
+proof/Verif_extract_fast.v
+proof/Verif_u128_from_u64.v
+proof/Verif_u128_accum_u64.v
+proof/Verif_u128_accum_mul.v
+proof/Verif_u128_rshift.v
+proof/Verif_scalar_check_overflow.v
+proof/Verif_scalar_reduce.v
+proof/Verif_scalar_reduce_512.v
+proof/Verif_scalar_mul_512.v
+proof/Verif_scalar_mul.v

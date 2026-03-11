@@ -1,0 +1,31 @@
+FROM docker.io/ocaml/opam:debian-12-ocaml-4.14
+
+ARG VST_VERSION=2.16
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libgmp-dev \
+    m4 \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+USER opam
+WORKDIR /home/opam
+
+RUN opam repo add coq-released https://coq.inria.fr/opam/released \
+    && opam update
+
+RUN opam install -y \
+    rocq-prover \
+    "coq-vst.${VST_VERSION}" \
+    vsrocq-language-server
+
+ENV PATH="/home/opam/.opam/4.14/bin:$PATH"
+
+RUN rocq --version \
+    && clightgen --version \
+    && which vsrocqtop
+
+WORKDIR /workspace

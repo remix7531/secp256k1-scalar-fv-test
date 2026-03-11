@@ -1,0 +1,17 @@
+{
+  "name": "secp256k1-scalar-fv",
+  "build": {
+    "dockerfile": "Container"
+  },
+  "runArgs": ["--userns=keep-id"],
+  "containerUser": "opam",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rocq-prover.vsrocq"
+      ]
+    }
+  }
+}

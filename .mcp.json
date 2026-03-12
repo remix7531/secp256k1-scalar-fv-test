@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rocq": {
+      "command": "rocq-mcp",
+      "type": "stdio"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "vsrocq.proof.workers": 6,
+  "vsrocq.memory.limit": 24,
+  "vsrocq.args": ["-Q", "proof", "scalar_4x64"]
+}

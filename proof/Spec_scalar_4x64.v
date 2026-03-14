@@ -148,6 +148,49 @@ Definition muladd_fast_spec : ident * funspec :=
                     (muladd_c1 c0 c1 a b)
                     c2) acc_ptr).
 
+(* ================================================================= *)
+(** ** extract / extract_fast *)
+
+(** [extract] writes c0 to [*n] and shifts the accumulator:
+    (c0, c1, c2) → (c1, c2, 0). *)
+Definition extract_spec : ident * funspec :=
+  DECLARE _extract
+  WITH acc_ptr : val, n_ptr : val, c0 : Z, c1 : Z, c2 : Z, sh : share, sh_n : share
+  PRE [ tptr (Tstruct __214 noattr), tptr tulong ]
+    PROP (writable_share sh;
+          writable_share sh_n;
+          0 <= c0 <= Int64.max_unsigned;
+          0 <= c1 <= Int64.max_unsigned;
+          0 <= c2 <= Int64.max_unsigned)
+    PARAMS (acc_ptr; n_ptr)
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr;
+         data_at_ sh_n tulong n_ptr)
+  POST [ tvoid ]
+    PROP ()
+    RETURN ()
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c1 c2 0) acc_ptr;
+         data_at sh_n tulong (Vlong (Int64.repr c0)) n_ptr).
+
+(** [extract_fast] writes c0 to [*n] and shifts: (c0, c1, c2) → (c1, 0, c2).
+    c2 is required to be zero by contract, but we leave it untouched. *)
+Definition extract_fast_spec : ident * funspec :=
+  DECLARE _extract_fast
+  WITH acc_ptr : val, n_ptr : val, c0 : Z, c1 : Z, c2 : Z, sh : share, sh_n : share
+  PRE [ tptr (Tstruct __214 noattr), tptr tulong ]
+    PROP (writable_share sh;
+          writable_share sh_n;
+          0 <= c0 <= Int64.max_unsigned;
+          0 <= c1 <= Int64.max_unsigned;
+          0 <= c2 <= Int64.max_unsigned)
+    PARAMS (acc_ptr; n_ptr)
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr;
+         data_at_ sh_n tulong n_ptr)
+  POST [ tvoid ]
+    PROP ()
+    RETURN ()
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c1 0 c2) acc_ptr;
+         data_at sh_n tulong (Vlong (Int64.repr c0)) n_ptr).
+
 (** Collect all specs into Gprog. *)
 Definition Gprog : funspecs :=
   ltac:(with_library prog [
@@ -156,5 +199,7 @@ Definition Gprog : funspecs :=
     secp256k1_umul128_spec;
     secp256k1_u128_mul_spec;
     muladd_spec;
-    muladd_fast_spec
+    muladd_fast_spec;
+    extract_spec;
+    extract_fast_spec
   ]).

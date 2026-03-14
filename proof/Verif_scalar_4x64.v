@@ -608,3 +608,25 @@ Proof.
     destruct (_ <? _);
     apply Zbits.eqmod_mod; lia.
 Qed.
+
+(* ================================================================= *)
+(** ** extract *)
+
+Lemma body_extract:
+  semax_body Vprog Gprog f_extract extract_spec.
+Proof.
+  start_function.
+  repeat forward.
+  entailer!.
+Qed.
+
+(* ================================================================= *)
+(** ** extract_fast *)
+
+Lemma body_extract_fast:
+  semax_body Vprog Gprog f_extract_fast extract_fast_spec.
+Proof.
+  start_function.
+  repeat forward.
+  entailer!.
+Qed. 

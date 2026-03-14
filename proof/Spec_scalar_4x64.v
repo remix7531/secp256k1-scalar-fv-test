@@ -85,11 +85,76 @@ Definition secp256k1_u128_mul_spec : ident * funspec :=
     SEP (data_at sh (Tstruct __191 noattr)
            (u128_val (umul128_lo a b) (umul128_hi a b)) r_ptr).
 
+(* ================================================================= *)
+(** ** 192-bit accumulator model and specs *)
+
+(** A 192-bit accumulator represented as (c0 : uint64, c1 : uint64, c2 : uint32). *)
+Definition acc_val (c0 c1 : Z) (c2 : Z) : reptype (Tstruct __214 noattr) :=
+  (Vlong (Int64.repr c0), (Vlong (Int64.repr c1), Vint (Int.repr c2))).
+
+(** The full 192-bit value of an accumulator. *)
+Definition acc_full (c0 c1 c2 : Z) : Z :=
+  c0 + c1 * 2^64 + c2 * 2^128.
+
+(** Functional model: muladd adds a*b to the 192-bit accumulator. *)
+Definition muladd_c0 (c0 a b : Z) : Z := (c0 + (a * b) mod 2^64) mod 2^64.
+Definition muladd_th (c0 a b : Z) : Z := (a * b) / 2^64 + (if c0 + (a * b) mod 2^64 <? 2^64 then 0 else 1).
+Definition muladd_c1 (c0 c1 a b : Z) : Z := (c1 + muladd_th c0 a b) mod 2^64.
+Definition muladd_c2 (c0 c1 c2 a b : Z) : Z := (c2 + (if c1 + muladd_th c0 a b <? 2^64 then 0 else 1)) mod 2^32.
+
+(** [muladd] adds a*b to the 192-bit number (c0,c1,c2). c2 must never overflow. *)
+Definition muladd_spec : ident * funspec :=
+  DECLARE _muladd
+  WITH acc_ptr : val, a : Z, b : Z, c0 : Z, c1 : Z, c2 : Z, sh : share
+  PRE [ tptr (Tstruct __214 noattr), tulong, tulong ]
+    PROP (writable_share sh;
+          0 <= a <= Int64.max_unsigned;
+          0 <= b <= Int64.max_unsigned;
+          0 <= c0 <= Int64.max_unsigned;
+          0 <= c1 <= Int64.max_unsigned;
+          0 <= c2 <= Int.max_unsigned;
+          (** c2 must not overflow after the addition *)
+          acc_full c0 c1 c2 + a * b < 2^192)
+    PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr)
+  POST [ tvoid ]
+    PROP ()
+    RETURN ()
+    SEP (data_at sh (Tstruct __214 noattr)
+           (acc_val (muladd_c0 c0 a b)
+                    (muladd_c1 c0 c1 a b)
+                    (muladd_c2 c0 c1 c2 a b)) acc_ptr).
+
+(** [muladd_fast] adds a*b to (c0,c1). c1 must never overflow; c2 is untouched. *)
+Definition muladd_fast_spec : ident * funspec :=
+  DECLARE _muladd_fast
+  WITH acc_ptr : val, a : Z, b : Z, c0 : Z, c1 : Z, c2 : Z, sh : share
+  PRE [ tptr (Tstruct __214 noattr), tulong, tulong ]
+    PROP (writable_share sh;
+          0 <= a <= Int64.max_unsigned;
+          0 <= b <= Int64.max_unsigned;
+          0 <= c0 <= Int64.max_unsigned;
+          0 <= c1 <= Int64.max_unsigned;
+          0 <= c2 <= Int.max_unsigned;
+          (** c1 must not overflow after the addition *)
+          c0 + c1 * 2^64 + a * b < 2^128)
+    PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
+    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr)
+  POST [ tvoid ]
+    PROP ()
+    RETURN ()
+    SEP (data_at sh (Tstruct __214 noattr)
+           (acc_val (muladd_c0 c0 a b)
+                    (muladd_c1 c0 c1 a b)
+                    c2) acc_ptr).
+
 (** Collect all specs into Gprog. *)
 Definition Gprog : funspecs :=
   ltac:(with_library prog [
     secp256k1_u128_to_u64_spec;
     secp256k1_u128_hi_u64_spec;
     secp256k1_umul128_spec;
-    secp256k1_u128_mul_spec
+    secp256k1_u128_mul_spec;
+    muladd_spec;
+    muladd_fast_spec
   ]).

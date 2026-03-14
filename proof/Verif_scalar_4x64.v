@@ -412,3 +412,198 @@ Proof.
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
   entailer!.
 Qed.
+
+(* ================================================================= *)
+(** ** muladd *)
+
+Lemma umul128_lo_range : forall a b,
+  0 <= a <= Int64.max_unsigned ->
+  0 <= b <= Int64.max_unsigned ->
+  0 <= umul128_lo a b <= Int64.max_unsigned.
+Proof.
+  intros a b Ha Hb.
+  unfold umul128_lo. split.
+  - apply Z.mod_pos_bound; lia.
+  - assert (0 <= (a * b) mod 2^64 < 2^64).
+    { apply Z.mod_pos_bound; lia. }
+    rep_lia.
+Qed.
+
+Lemma umul128_hi_range : forall a b,
+  0 <= a <= Int64.max_unsigned ->
+  0 <= b <= Int64.max_unsigned ->
+  0 <= umul128_hi a b <= Int64.max_unsigned.
+Proof.
+  intros a b Ha Hb.
+  unfold umul128_hi. split.
+  - apply Z.div_pos; nia.
+  - assert (0 <= (a * b) / 2^64 < 2^64).
+    { split.
+      - apply Z.div_pos; [nia | lia].
+      - apply Z.div_lt_upper_bound; [lia|].
+        unfold Int64.max_unsigned in *; simpl in *; nia. }
+    rep_lia.
+Qed.
+
+Lemma mod_64_range : forall x,
+  0 <= x mod Int64.modulus <= Int64.max_unsigned.
+Proof.
+  intros.
+  assert (H : 0 <= x mod Int64.modulus < Int64.modulus).
+  { apply Z.mod_pos_bound; rep_lia. }
+  rep_lia.
+Qed.
+
+(** Unsigned addition carry detection: comparing [c0 + tl < tl] after
+    wrapping gives 0 when no overflow occurred, 1 otherwise. *)
+Lemma carry_detect_b2z : forall c0 tl,
+  0 <= c0 <= Int64.max_unsigned ->
+  0 <= tl <= Int64.max_unsigned ->
+  Z.b2z (Int64.ltu (Int64.repr (c0 + tl)) (Int64.repr tl)) =
+  (if c0 + tl <? Int64.modulus then 0 else 1).
+Proof.
+  intros.
+  destruct (c0 + tl <? Int64.modulus) eqn:Hcarry.
+  + (* no overflow: c0 + tl fits, so repr is identity and (c0+tl) >= tl *)
+    apply Z.ltb_lt in Hcarry.
+    unfold Int64.ltu.
+    rewrite !Int64.unsigned_repr by rep_lia.
+    rewrite zlt_false by lia.
+    reflexivity.
+  + (* overflow: c0 + tl wraps to (c0+tl - 2^64), which is < tl *)
+    apply Z.ltb_ge in Hcarry.
+    unfold Int64.ltu.
+    rewrite (Int64.unsigned_repr tl) by rep_lia.
+    rewrite Int64.unsigned_repr_eq.
+    replace ((c0 + tl) mod Int64.modulus) with (c0 + tl - Int64.modulus)
+      by (symmetry; apply Zmod_unique with 1; rep_lia).
+    rewrite zlt_true by rep_lia.
+    reflexivity.
+Qed.
+
+Lemma body_muladd:
+  semax_body Vprog Gprog f_muladd muladd_spec.
+Proof.
+  start_function.
+
+  (* secp256k1_u128_mul(&t, a, b) *)
+  forward_call.
+  (* tl = secp256k1_u128_to_u64(&t) *)
+  forward_call.
+  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+  (* th = secp256k1_u128_hi_u64(&t) *)
+  forward_call.
+  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  (* acc->c0 += tl *)
+  forward.
+  (* th += (acc->c0 < tl) *)
+  forward.
+  (* acc->c1 += th *)
+  forward.
+  forward.
+  forward.
+  forward.
+  (* acc->c2 += (acc->c1 < th) *)
+  forward.
+  forward.
+  forward.
+
+  assert (Hab_mod: 0 <= (a * b) mod 2 ^ 64 <= Int64.max_unsigned). {
+    split.
+    + apply Z.mod_pos_bound; lia.
+    + apply mod_64_range.
+  }
+
+  assert (Hab_div: 0 <= a * b / 2 ^ 64 <= Int64.max_unsigned). {
+    split.
+    + apply Z.div_pos; nia.
+    + enough (a * b / 2 ^ 64 < 2 ^ 64) by rep_lia.
+      apply Z.div_lt_upper_bound; try lia.
+      unfold Int64.max_unsigned in *;
+      simpl in *.
+      nia.
+  }
+
+  (* th + carry fits in 64 bits because a*b <= (2^64-1)^2. *)
+  assert (Hth_carry: 0 <= a * b / 2 ^ 64 + 1 <= Int64.max_unsigned).
+  { split; try lia.
+    enough (a * b / 2^64 < 2^64 - 1) by rep_lia.
+    apply Z.div_lt_upper_bound; try lia.
+    apply Z.le_lt_trans with ((2^64 - 1) * (2^64 - 1)); try rep_lia.
+    apply Z.mul_le_mono_nonneg; rep_lia. }
+
+  (* --- Postcondition --- *)
+  entailer!.
+  unfold acc_val, muladd_c0, muladd_c1, muladd_c2, muladd_th, umul128_lo, umul128_hi.
+  apply derives_refl'.
+  f_equal; f_equal; f_equal.
+  + (* c0: repr (c0 + lo) = repr ((c0 + lo) mod 2^64) *)
+    apply Int64.eqm_samerepr.
+    apply Zbits.eqmod_mod; lia.
+  + (* c1: repr (c1 + th + carry0) = repr ((c1 + th + carry0) mod 2^64) *)
+    f_equal.
+    apply Int64.eqm_samerepr.
+    rewrite carry_detect_b2z; try assumption.
+    destruct (_ <? _);
+    apply Zbits.eqmod_mod; lia.
+  + (* c2: repr (c2 + carry1) = repr ((c2 + carry1) mod 2^32) *)
+    f_equal.
+    apply Int.eqm_samerepr.
+    rewrite carry_detect_b2z; try assumption.
+    - rewrite carry_detect_b2z; try assumption.
+      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
+      apply Zbits.eqmod_mod; lia.
+    - rewrite carry_detect_b2z; try assumption.
+      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
+      destruct (_ <? _); lia.
+Qed.
+
+(* ================================================================= *)
+(** ** muladd_fast *)
+
+Lemma body_muladd_fast:
+  semax_body Vprog Gprog f_muladd_fast muladd_fast_spec.
+Proof.
+  start_function.
+
+  (* secp256k1_u128_mul(&t, a, b) *)
+  forward_call.
+  (* tl = secp256k1_u128_to_u64(&t) *)
+  forward_call.
+  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+  (* th = secp256k1_u128_hi_u64(&t) *)
+  forward_call.
+  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  (* acc->c0 += tl *)
+  forward.
+  (* th += (acc->c0 < tl) *)
+  forward.
+  (* acc->c1 += th *)
+  forward.
+  forward.
+  forward.
+  forward.
+
+  assert (Hab_mod: 0 <= (a * b) mod 2 ^ 64 <= Int64.max_unsigned). {
+    split.
+    + apply Z.mod_pos_bound; lia.
+    + apply mod_64_range.
+  }
+
+  (* --- Postcondition --- *)
+  entailer!.
+  unfold acc_val, muladd_c0, muladd_c1, muladd_th, umul128_lo, umul128_hi.
+  apply derives_refl'.
+  f_equal; f_equal; f_equal.
+  - (* c0: repr (c0 + lo) = repr ((c0 + lo) mod 2^64) *)
+    apply Int64.eqm_samerepr.
+    apply Zbits.eqmod_mod; lia.
+  - (* c1: repr (c1 + th + carry) = repr ((c1 + th + carry) mod 2^64) *)
+    f_equal.
+    apply Int64.eqm_samerepr.
+    rewrite carry_detect_b2z; try assumption.
+    destruct (_ <? _);
+    apply Zbits.eqmod_mod; lia.
+Qed.

@@ -547,11 +547,12 @@ Proof.
     rewrite carry_detect_b2z; try assumption.
     destruct (_ <? _);
     apply Zbits.eqmod_mod; lia.
-  + (* c2: repr (c2 + carry1) = repr ((c2 + carry1) mod 2^32) *)
+  + (* c2: repr (c2 + carry1) = repr ((c2 + carry1) mod 2^64) *)
     f_equal.
-    apply Int.eqm_samerepr.
+    apply Int64.eqm_samerepr.
     rewrite carry_detect_b2z; try assumption.
     - rewrite carry_detect_b2z; try assumption.
+      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
       rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
       apply Zbits.eqmod_mod; lia.
     - rewrite carry_detect_b2z; try assumption.

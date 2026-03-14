@@ -88,9 +88,9 @@ Definition secp256k1_u128_mul_spec : ident * funspec :=
 (* ================================================================= *)
 (** ** 192-bit accumulator model and specs *)
 
-(** A 192-bit accumulator represented as (c0 : uint64, c1 : uint64, c2 : uint32). *)
+(** A 192-bit accumulator represented as (c0 : uint64, c1 : uint64, c2 : uint64). *)
 Definition acc_val (c0 c1 : Z) (c2 : Z) : reptype (Tstruct __214 noattr) :=
-  (Vlong (Int64.repr c0), (Vlong (Int64.repr c1), Vint (Int.repr c2))).
+  (Vlong (Int64.repr c0), (Vlong (Int64.repr c1), Vlong (Int64.repr c2))).
 
 (** The full 192-bit value of an accumulator. *)
 Definition acc_full (c0 c1 c2 : Z) : Z :=
@@ -100,7 +100,7 @@ Definition acc_full (c0 c1 c2 : Z) : Z :=
 Definition muladd_c0 (c0 a b : Z) : Z := (c0 + (a * b) mod 2^64) mod 2^64.
 Definition muladd_th (c0 a b : Z) : Z := (a * b) / 2^64 + (if c0 + (a * b) mod 2^64 <? 2^64 then 0 else 1).
 Definition muladd_c1 (c0 c1 a b : Z) : Z := (c1 + muladd_th c0 a b) mod 2^64.
-Definition muladd_c2 (c0 c1 c2 a b : Z) : Z := (c2 + (if c1 + muladd_th c0 a b <? 2^64 then 0 else 1)) mod 2^32.
+Definition muladd_c2 (c0 c1 c2 a b : Z) : Z := (c2 + (if c1 + muladd_th c0 a b <? 2^64 then 0 else 1)) mod 2^64.
 
 (** [muladd] adds a*b to the 192-bit number (c0,c1,c2). c2 must never overflow. *)
 Definition muladd_spec : ident * funspec :=
@@ -112,7 +112,7 @@ Definition muladd_spec : ident * funspec :=
           0 <= b <= Int64.max_unsigned;
           0 <= c0 <= Int64.max_unsigned;
           0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int.max_unsigned;
+          0 <= c2 <= Int64.max_unsigned;
           (** c2 must not overflow after the addition *)
           acc_full c0 c1 c2 + a * b < 2^192)
     PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
@@ -135,7 +135,7 @@ Definition muladd_fast_spec : ident * funspec :=
           0 <= b <= Int64.max_unsigned;
           0 <= c0 <= Int64.max_unsigned;
           0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int.max_unsigned;
+          0 <= c2 <= Int64.max_unsigned;
           (** c1 must not overflow after the addition *)
           c0 + c1 * 2^64 + a * b < 2^128)
     PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))

@@ -191,6 +191,50 @@ Definition extract_fast_spec : ident * funspec :=
     SEP (data_at sh (Tstruct __214 noattr) (acc_val c1 0 c2) acc_ptr;
          data_at sh_n tulong (Vlong (Int64.repr c0)) n_ptr).
 
+(* ================================================================= *)
+(** ** secp256k1_scalar_mul_512 *)
+
+(** A 256-bit scalar represented as four 64-bit limbs (little-endian). *)
+Definition scalar_val (d : list Z) : reptype (Tstruct __185 noattr) :=
+  map Vlong (map Int64.repr d).
+
+(** The full 256-bit value of a scalar [d0..d3]. *)
+Definition scalar_full (d : list Z) : Z :=
+  Znth 0 d + Znth 1 d * 2^64 + Znth 2 d * 2^128 + Znth 3 d * 2^192.
+
+(** The 512-bit product of two 256-bit scalars, represented as eight
+    64-bit limbs.  We specify it abstractly: each output limb [l8[i]]
+    is the [i]-th 64-bit word of [a * b]. *)
+Definition mul_512_limb (a b : list Z) (i : nat) : Z :=
+  (scalar_full a * scalar_full b / 2^(64 * Z.of_nat i)) mod 2^64.
+
+Definition mul_512_result (a b : list Z) : list val :=
+  map (fun i => Vlong (Int64.repr (mul_512_limb a b i))) (seq 0 8).
+
+Definition secp256k1_scalar_mul_512_spec : ident * funspec :=
+  DECLARE _secp256k1_scalar_mul_512
+  WITH l8_ptr : val, a_ptr : val, b_ptr : val,
+       a : list Z, b : list Z,
+       sh_l : share, sh_a : share, sh_b : share
+  PRE [ tptr tulong, tptr (Tstruct __185 noattr), tptr (Tstruct __185 noattr) ]
+    PROP (writable_share sh_l;
+          readable_share sh_a;
+          readable_share sh_b;
+          Zlength a = 4;
+          Zlength b = 4;
+          Forall (fun x => 0 <= x <= Int64.max_unsigned) a;
+          Forall (fun x => 0 <= x <= Int64.max_unsigned) b)
+    PARAMS (l8_ptr; a_ptr; b_ptr)
+    SEP (data_at_ sh_l (tarray tulong 8) l8_ptr;
+         data_at sh_a (Tstruct __185 noattr) (scalar_val a) a_ptr;
+         data_at sh_b (Tstruct __185 noattr) (scalar_val b) b_ptr)
+  POST [ tvoid ]
+    PROP ()
+    RETURN ()
+    SEP (data_at sh_l (tarray tulong 8) (mul_512_result a b) l8_ptr;
+         data_at sh_a (Tstruct __185 noattr) (scalar_val a) a_ptr;
+         data_at sh_b (Tstruct __185 noattr) (scalar_val b) b_ptr).
+
 (** Collect all specs into Gprog. *)
 Definition Gprog : funspecs :=
   ltac:(with_library prog [
@@ -201,5 +245,6 @@ Definition Gprog : funspecs :=
     muladd_spec;
     muladd_fast_spec;
     extract_spec;
-    extract_fast_spec
+    extract_fast_spec;
+    secp256k1_scalar_mul_512_spec
   ]).

@@ -1,4 +1,8 @@
-(** * Spec_scalar_4x64: Functional model and API specs for scalar_4x64.c *)
+(** * Spec_scalar_4x64: Public functional model and API spec for scalar_4x64.c *)
+(** This file mirrors the public interface [scalar_4x64.h]:
+    only [secp256k1_scalar_mul_512] and the supporting type
+    definitions are exposed here.  Internal helper specs (u128,
+    accumulator, muladd, extract) live in [Spec_scalar_4x64_internal]. *)
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
@@ -8,243 +12,83 @@ Require Import scalar_4x64.scalar_4x64.
 Definition Vprog : varspecs. mk_varspecs prog. Defined.
 
 (* ================================================================= *)
-(** ** Functional model *)
+(** ** Types *)
 
-(** A 128-bit unsigned integer represented as two 64-bit limbs. *)
-Definition u128_val (lo hi : Z) : reptype (Tstruct __191 noattr) :=
-  (Vlong (Int64.repr lo), Vlong (Int64.repr hi)).
+(** A 256-bit unsigned integer. *)
+Record UInt256 := mkUInt256 {
+  u256_val : Z;
+  u256_range : 0 <= u256_val < 2^256
+}.
 
-(** Full 64×64 → 128-bit multiplication at the Z level. *)
-Definition umul128_full (a b : Z) : Z := a * b.
-Definition umul128_lo   (a b : Z) : Z := (a * b) mod 2^64.
-Definition umul128_hi   (a b : Z) : Z := (a * b) / 2^64.
-
-(* ================================================================= *)
-(** ** Function specifications *)
-
-(** [secp256k1_u128_to_u64] simply returns the low 64 bits of a uint128. *)
-Definition secp256k1_u128_to_u64_spec : ident * funspec :=
-  DECLARE _secp256k1_u128_to_u64
-  WITH a_ptr : val, lo : Z, hi : Z, sh : share
-  PRE [ tptr (Tstruct __191 noattr) ]
-    PROP (readable_share sh;
-          0 <= lo <= Int64.max_unsigned;
-          0 <= hi <= Int64.max_unsigned)
-    PARAMS (a_ptr)
-    SEP (data_at sh (Tstruct __191 noattr) (u128_val lo hi) a_ptr)
-  POST [ tulong ]
-    PROP ()
-    RETURN (Vlong (Int64.repr lo))
-    SEP (data_at sh (Tstruct __191 noattr) (u128_val lo hi) a_ptr).
-
-(** [secp256k1_u128_hi_u64] returns the high 64 bits of a uint128. *)
-Definition secp256k1_u128_hi_u64_spec : ident * funspec :=
-  DECLARE _secp256k1_u128_hi_u64
-  WITH a_ptr : val, lo : Z, hi : Z, sh : share
-  PRE [ tptr (Tstruct __191 noattr) ]
-    PROP (readable_share sh;
-          0 <= lo <= Int64.max_unsigned;
-          0 <= hi <= Int64.max_unsigned)
-    PARAMS (a_ptr)
-    SEP (data_at sh (Tstruct __191 noattr) (u128_val lo hi) a_ptr)
-  POST [ tulong ]
-    PROP ()
-    RETURN (Vlong (Int64.repr hi))
-    SEP (data_at sh (Tstruct __191 noattr) (u128_val lo hi) a_ptr).
-
-(** [secp256k1_umul128] computes a*b as a 128-bit result.
-    Returns the low 64 bits; writes the high 64 bits to [*hi]. *)
-Definition secp256k1_umul128_spec : ident * funspec :=
-  DECLARE _secp256k1_umul128
-  WITH a : Z, b : Z, hi_ptr : val, sh : share
-  PRE [ tulong, tulong, tptr tulong ]
-    PROP (writable_share sh;
-          0 <= a <= Int64.max_unsigned;
-          0 <= b <= Int64.max_unsigned)
-    PARAMS (Vlong (Int64.repr a); Vlong (Int64.repr b); hi_ptr)
-    SEP (data_at_ sh tulong hi_ptr)
-  POST [ tulong ]
-    PROP (0 <= umul128_lo a b <= Int64.max_unsigned;
-          0 <= umul128_hi a b <= Int64.max_unsigned)
-    RETURN (Vlong (Int64.repr (umul128_lo a b)))
-    SEP (data_at sh tulong (Vlong (Int64.repr (umul128_hi a b))) hi_ptr).
-
-(** [secp256k1_u128_mul] stores a*b into the uint128 struct [*r]. *)
-Definition secp256k1_u128_mul_spec : ident * funspec :=
-  DECLARE _secp256k1_u128_mul
-  WITH r_ptr : val, a : Z, b : Z, sh : share
-  PRE [ tptr (Tstruct __191 noattr), tulong, tulong ]
-    PROP (writable_share sh;
-          0 <= a <= Int64.max_unsigned;
-          0 <= b <= Int64.max_unsigned)
-    PARAMS (r_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
-    SEP (data_at_ sh (Tstruct __191 noattr) r_ptr)
-  POST [ tvoid ]
-    PROP ()
-    RETURN ()
-    SEP (data_at sh (Tstruct __191 noattr)
-           (u128_val (umul128_lo a b) (umul128_hi a b)) r_ptr).
+(** A 512-bit unsigned integer. *)
+Record UInt512 := mkUInt512 {
+  u512_val : Z;
+  u512_range : 0 <= u512_val < 2^512
+}.
 
 (* ================================================================= *)
-(** ** 192-bit accumulator model and specs *)
+(** ** Operations *)
 
-(** A 192-bit accumulator represented as (c0 : uint64, c1 : uint64, c2 : uint64). *)
-Definition acc_val (c0 c1 : Z) (c2 : Z) : reptype (Tstruct __214 noattr) :=
-  (Vlong (Int64.repr c0), (Vlong (Int64.repr c1), Vlong (Int64.repr c2))).
-
-(** The full 192-bit value of an accumulator. *)
-Definition acc_full (c0 c1 c2 : Z) : Z :=
-  c0 + c1 * 2^64 + c2 * 2^128.
-
-(** Functional model: muladd adds a*b to the 192-bit accumulator. *)
-Definition muladd_c0 (c0 a b : Z) : Z := (c0 + (a * b) mod 2^64) mod 2^64.
-Definition muladd_th (c0 a b : Z) : Z := (a * b) / 2^64 + (if c0 + (a * b) mod 2^64 <? 2^64 then 0 else 1).
-Definition muladd_c1 (c0 c1 a b : Z) : Z := (c1 + muladd_th c0 a b) mod 2^64.
-Definition muladd_c2 (c0 c1 c2 a b : Z) : Z := (c2 + (if c1 + muladd_th c0 a b <? 2^64 then 0 else 1)) mod 2^64.
-
-(** [muladd] adds a*b to the 192-bit number (c0,c1,c2). c2 must never overflow. *)
-Definition muladd_spec : ident * funspec :=
-  DECLARE _muladd
-  WITH acc_ptr : val, a : Z, b : Z, c0 : Z, c1 : Z, c2 : Z, sh : share
-  PRE [ tptr (Tstruct __214 noattr), tulong, tulong ]
-    PROP (writable_share sh;
-          0 <= a <= Int64.max_unsigned;
-          0 <= b <= Int64.max_unsigned;
-          0 <= c0 <= Int64.max_unsigned;
-          0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int64.max_unsigned;
-          (** c2 must not overflow after the addition *)
-          acc_full c0 c1 c2 + a * b < 2^192)
-    PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr)
-  POST [ tvoid ]
-    PROP ()
-    RETURN ()
-    SEP (data_at sh (Tstruct __214 noattr)
-           (acc_val (muladd_c0 c0 a b)
-                    (muladd_c1 c0 c1 a b)
-                    (muladd_c2 c0 c1 c2 a b)) acc_ptr).
-
-(** [muladd_fast] adds a*b to (c0,c1). c1 must never overflow; c2 is untouched. *)
-Definition muladd_fast_spec : ident * funspec :=
-  DECLARE _muladd_fast
-  WITH acc_ptr : val, a : Z, b : Z, c0 : Z, c1 : Z, c2 : Z, sh : share
-  PRE [ tptr (Tstruct __214 noattr), tulong, tulong ]
-    PROP (writable_share sh;
-          0 <= a <= Int64.max_unsigned;
-          0 <= b <= Int64.max_unsigned;
-          0 <= c0 <= Int64.max_unsigned;
-          0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int64.max_unsigned;
-          (** c1 must not overflow after the addition *)
-          c0 + c1 * 2^64 + a * b < 2^128)
-    PARAMS (acc_ptr; Vlong (Int64.repr a); Vlong (Int64.repr b))
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr)
-  POST [ tvoid ]
-    PROP ()
-    RETURN ()
-    SEP (data_at sh (Tstruct __214 noattr)
-           (acc_val (muladd_c0 c0 a b)
-                    (muladd_c1 c0 c1 a b)
-                    c2) acc_ptr).
+(** 256 x 256 -> 512-bit multiplication. *)
+Program Definition mul_256 (a b : UInt256) : UInt512 :=
+  mkUInt512 (u256_val a * u256_val b) _.
+Next Obligation.
+  destruct a as [av [Ha0 Ha1]], b as [bv [Hb0 Hb1]]. simpl.
+  split.
+  - apply Z.mul_nonneg_nonneg; lia.
+  - replace (Z.pow_pos 2 512) with (2^256 * 2^256) by reflexivity.
+    apply Z.mul_lt_mono_nonneg; lia.
+Qed.
 
 (* ================================================================= *)
-(** ** extract / extract_fast *)
+(** ** C representation *)
 
-(** [extract] writes c0 to [*n] and shifts the accumulator:
-    (c0, c1, c2) → (c1, c2, 0). *)
-Definition extract_spec : ident * funspec :=
-  DECLARE _extract
-  WITH acc_ptr : val, n_ptr : val, c0 : Z, c1 : Z, c2 : Z, sh : share, sh_n : share
-  PRE [ tptr (Tstruct __214 noattr), tptr tulong ]
-    PROP (writable_share sh;
-          writable_share sh_n;
-          0 <= c0 <= Int64.max_unsigned;
-          0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int64.max_unsigned)
-    PARAMS (acc_ptr; n_ptr)
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr;
-         data_at_ sh_n tulong n_ptr)
-  POST [ tvoid ]
-    PROP ()
-    RETURN ()
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c1 c2 0) acc_ptr;
-         data_at sh_n tulong (Vlong (Int64.repr c0)) n_ptr).
+(** The [i]-th 64-bit limb of [x]: [(x / 2^(64*i)) mod 2^64]. *)
+Definition limb64 (x : Z) (i : nat) : Z :=
+  (x / 2^(64 * Z.of_nat i)) mod 2^64.
 
-(** [extract_fast] writes c0 to [*n] and shifts: (c0, c1, c2) → (c1, 0, c2).
-    c2 is required to be zero by contract, but we leave it untouched. *)
-Definition extract_fast_spec : ident * funspec :=
-  DECLARE _extract_fast
-  WITH acc_ptr : val, n_ptr : val, c0 : Z, c1 : Z, c2 : Z, sh : share, sh_n : share
-  PRE [ tptr (Tstruct __214 noattr), tptr tulong ]
-    PROP (writable_share sh;
-          writable_share sh_n;
-          0 <= c0 <= Int64.max_unsigned;
-          0 <= c1 <= Int64.max_unsigned;
-          0 <= c2 <= Int64.max_unsigned)
-    PARAMS (acc_ptr; n_ptr)
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c0 c1 c2) acc_ptr;
-         data_at_ sh_n tulong n_ptr)
-  POST [ tvoid ]
-    PROP ()
-    RETURN ()
-    SEP (data_at sh (Tstruct __214 noattr) (acc_val c1 0 c2) acc_ptr;
-         data_at sh_n tulong (Vlong (Int64.repr c0)) n_ptr).
+(** Represent a [UInt256] as a 4-limb C scalar struct. *)
+Definition uint256_to_val (x : UInt256) : reptype (Tstruct __185 noattr) :=
+  [ Vlong (Int64.repr (limb64 (u256_val x) 0));
+    Vlong (Int64.repr (limb64 (u256_val x) 1));
+    Vlong (Int64.repr (limb64 (u256_val x) 2));
+    Vlong (Int64.repr (limb64 (u256_val x) 3)) ].
+
+(** Represent a [UInt512] as an 8-limb C array. *)
+Definition uint512_to_val (x : UInt512) : list val :=
+  [ Vlong (Int64.repr (limb64 (u512_val x) 0));
+    Vlong (Int64.repr (limb64 (u512_val x) 1));
+    Vlong (Int64.repr (limb64 (u512_val x) 2));
+    Vlong (Int64.repr (limb64 (u512_val x) 3));
+    Vlong (Int64.repr (limb64 (u512_val x) 4));
+    Vlong (Int64.repr (limb64 (u512_val x) 5));
+    Vlong (Int64.repr (limb64 (u512_val x) 6));
+    Vlong (Int64.repr (limb64 (u512_val x) 7)) ].
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
 
-(** A 256-bit scalar represented as four 64-bit limbs (little-endian). *)
-Definition scalar_val (d : list Z) : reptype (Tstruct __185 noattr) :=
-  map Vlong (map Int64.repr d).
+(** The public specification for [secp256k1_scalar_mul_512].
 
-(** The full 256-bit value of a scalar [d0..d3]. *)
-Definition scalar_full (d : list Z) : Z :=
-  Znth 0 d + Znth 1 d * 2^64 + Znth 2 d * 2^128 + Znth 3 d * 2^192.
-
-(** The 512-bit product of two 256-bit scalars, represented as eight
-    64-bit limbs.  We specify it abstractly: each output limb [l8[i]]
-    is the [i]-th 64-bit word of [a * b]. *)
-Definition mul_512_limb (a b : list Z) (i : nat) : Z :=
-  (scalar_full a * scalar_full b / 2^(64 * Z.of_nat i)) mod 2^64.
-
-Definition mul_512_result (a b : list Z) : list val :=
-  map (fun i => Vlong (Int64.repr (mul_512_limb a b i))) (seq 0 8).
-
+    Postcondition: the 8-limb array at [l8_ptr], interpreted as a
+    [UInt512], equals [mul_256 a b]. *)
 Definition secp256k1_scalar_mul_512_spec : ident * funspec :=
   DECLARE _secp256k1_scalar_mul_512
   WITH l8_ptr : val, a_ptr : val, b_ptr : val,
-       a : list Z, b : list Z,
+       a : UInt256, b : UInt256,
        sh_l : share, sh_a : share, sh_b : share
   PRE [ tptr tulong, tptr (Tstruct __185 noattr), tptr (Tstruct __185 noattr) ]
     PROP (writable_share sh_l;
           readable_share sh_a;
-          readable_share sh_b;
-          Zlength a = 4;
-          Zlength b = 4;
-          Forall (fun x => 0 <= x <= Int64.max_unsigned) a;
-          Forall (fun x => 0 <= x <= Int64.max_unsigned) b)
+          readable_share sh_b)
     PARAMS (l8_ptr; a_ptr; b_ptr)
     SEP (data_at_ sh_l (tarray tulong 8) l8_ptr;
-         data_at sh_a (Tstruct __185 noattr) (scalar_val a) a_ptr;
-         data_at sh_b (Tstruct __185 noattr) (scalar_val b) b_ptr)
+         data_at sh_a (Tstruct __185 noattr) (uint256_to_val a) a_ptr;
+         data_at sh_b (Tstruct __185 noattr) (uint256_to_val b) b_ptr)
   POST [ tvoid ]
-    PROP ()
+    EX r : UInt512,
+    PROP (r = mul_256 a b)
     RETURN ()
-    SEP (data_at sh_l (tarray tulong 8) (mul_512_result a b) l8_ptr;
-         data_at sh_a (Tstruct __185 noattr) (scalar_val a) a_ptr;
-         data_at sh_b (Tstruct __185 noattr) (scalar_val b) b_ptr).
-
-(** Collect all specs into Gprog. *)
-Definition Gprog : funspecs :=
-  ltac:(with_library prog [
-    secp256k1_u128_to_u64_spec;
-    secp256k1_u128_hi_u64_spec;
-    secp256k1_umul128_spec;
-    secp256k1_u128_mul_spec;
-    muladd_spec;
-    muladd_fast_spec;
-    extract_spec;
-    extract_fast_spec;
-    secp256k1_scalar_mul_512_spec
-  ]).
+    SEP (data_at sh_l (tarray tulong 8) (uint512_to_val r) l8_ptr;
+         data_at sh_a (Tstruct __185 noattr) (uint256_to_val a) a_ptr;
+         data_at sh_b (Tstruct __185 noattr) (uint256_to_val b) b_ptr).

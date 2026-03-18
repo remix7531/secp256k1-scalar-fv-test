@@ -6,7 +6,115 @@ Require Import VST.floyd.proofauto.
 Require Import compcert.lib.Zbits.
 Require Import scalar_4x64.scalar_4x64.
 Require Import scalar_4x64.Spec_scalar_4x64.
+Require Import scalar_4x64.Spec_scalar_4x64_internal.
 Require Import scalar_4x64.Array_fold_lemmas.
+
+
+(* Load only the ATP plugin; "From Hammer Require Import Hammer" re-exports
+   Hammer.Tactics which defines  Ltac forward H := ...  (one argument) and
+   that shadows VST's zero-argument forward, breaking every forward step.
+   Instead we load the Tactics library first, then override the conflicting
+   forward with VST's version, then load the plugin for the hammer tactic. *)
+Require Import Hammer.Tactics.Tactics.
+Ltac forward ::= VST.floyd.forward.forward.
+Declare ML Module "coq-hammer.plugin".
+
+(* ================================================================= *)
+(** ** Proof infrastructure *)
+
+Lemma limb64_range : forall x i, 0 <= limb64 x i < 2^64.
+Proof. intros. unfold limb64. apply Z.mod_pos_bound. lia. Qed.
+
+(** Bounds hint database *)
+Create HintDb bounds discriminated.
+#[export] Hint Resolve Z.mod_pos_bound : bounds.
+#[export] Hint Resolve Z.div_pos : bounds.
+#[export] Hint Resolve Z.mul_nonneg_nonneg : bounds.
+#[export] Hint Resolve Z.add_nonneg_nonneg : bounds.
+#[export] Hint Resolve limb64_range : bounds.
+
+(** [x mod 2^64] is in unsigned 64-bit range. *)
+Lemma mod_u64_range : forall x,
+  0 <= x mod Int64.modulus <= Int64.max_unsigned.
+Proof.
+  intros.
+  pose proof (Z.mod_pos_bound x Int64.modulus ltac:(rep_lia)).
+  rep_lia.
+Qed.
+
+(** [limb64 x i] is in unsigned 64-bit range. *)
+Lemma limb64_u64_range : forall x i,
+  0 <= limb64 x i <= Int64.max_unsigned.
+Proof.
+  intros. unfold limb64.
+  pose proof (Z.mod_pos_bound (x / 2^(64 * Z.of_nat i)) (2^64) ltac:(lia)).
+  rep_lia.
+Qed.
+
+(** Shifting by 64 bits advances the limb index:
+    [limb64 (x / 2^64) i = limb64 x (S i)]. *)
+Lemma limb64_shift : forall x i,
+  0 <= x ->
+  limb64 (x / 2^64) i = limb64 x (S i).
+Proof.
+  intros. unfold limb64.
+  simpl Z.of_nat.
+  rewrite Zdiv.Zdiv_Zdiv by lia.
+  rewrite <- Z.pow_add_r by lia.
+  f_equal. f_equal. f_equal. lia.
+Qed.
+
+(** Top limb of a value bounded by [2^(64*(i+1))] is 0. *)
+Lemma limb64_high_zero : forall x i,
+  0 <= x < 2^(64 * Z.of_nat (S i)) ->
+  limb64 x (S i) = 0.
+Proof.
+  intros. unfold limb64.
+  rewrite Z.div_small by lia.
+  reflexivity.
+Qed.
+
+(** Product of two 32-bit values fits in 64 bits. *)
+Lemma mul_u32_range : forall a b,
+  0 <= a <= Int.max_unsigned ->
+  0 <= b <= Int.max_unsigned ->
+  0 <= a * b <= Int64.max_unsigned.
+Proof.
+  intros.
+  unfold Int64.max_unsigned, Int.max_unsigned in *.
+  simpl in *.
+  split.
+  - apply Z.mul_nonneg_nonneg; lia.
+  - assert (a * b <= (2^32 - 1) * (2^32 - 1)) by (apply Z.mul_le_mono_nonneg; lia).
+    lia.
+Qed.
+
+(** The product of two 64-bit unsigned integers fits in 128 bits. *)
+Lemma mul_u64_lt_u128 : forall a b,
+  0 <= a < 2^64 ->
+  0 <= b < 2^64 ->
+  a * b < 2^128.
+Proof.
+  intros a b Ha Hb.
+  assert (a * b <= (2^64 - 1) * (2^64 - 1))
+    by (apply Z.mul_le_mono_nonneg; lia).
+  lia.
+Qed.
+
+(** The high half of a 64x64 multiplication fits strictly:
+    [(a * b) / 2^64 <= 2^64 - 2]. *)
+Lemma mul_u64_hi_le : forall a b,
+  0 <= a < 2^64 -> 0 <= b < 2^64 ->
+  (a * b) / 2^64 <= 2^64 - 2.
+Proof.
+  intros.
+  enough ((a * b) / 2^64 < 2^64 - 1) by lia.
+  apply Z.div_lt_upper_bound; [lia|]. nia.
+Qed.
+
+(** Euclidean division identity with commuted multiplication. *)
+Lemma div_mod_eq : forall a b, b <> 0 -> a = a / b * b + a mod b.
+Proof. intros. pose proof (Z_div_mod_eq_full a b). lia. Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_u128_to_u64 *)
@@ -21,6 +129,10 @@ Proof.
   start_function.
   forward. (* _t'1 = a->lo *)
   forward. (* return _t'1 *)
+  Exists (u128_lo x).
+  unfold u128_lo, uint64_to_val.
+  simpl.
+  entailer!.
 Qed.
 
 (* ================================================================= *)
@@ -35,27 +147,13 @@ Proof.
   start_function.
   forward. (* _t'1 = a->hi *)
   forward. (* return _t'1 *)
+  Exists (u128_hi x).
+  unfold u128_hi, uint128_to_val.
+  entailer!.
 Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_umul128 *)
-
-(** Helper lemmas for 64-bit modular arithmetic. *)
-
-(** Product of two 32-bit values fits in 64 bits. *)
-Lemma mul_32_32_range : forall a b,
-  0 <= a <= Int.max_unsigned ->
-  0 <= b <= Int.max_unsigned ->
-  0 <= a * b <= Int64.max_unsigned.
-Proof.
-  intros.
-  unfold Int64.max_unsigned, Int.max_unsigned in *.
-  simpl in *.
-  split.
-  - apply Z.mul_nonneg_nonneg; lia.
-  - assert (a * b <= (2^32 - 1) * (2^32 - 1)) by (apply Z.mul_le_mono_nonneg; lia).
-    lia.
-Qed.
 
 (** Shift right 32 on Int64 equals Z division. *)
 Lemma Int64_shru_32 : forall x,
@@ -82,14 +180,11 @@ Proof.
   change (two_p 32) with Int.modulus.
   apply Int64.eqm_samerepr.
   apply Int64.eqm_mult;
-  apply Int64.eqm_sym; apply Int64.eqm_unsigned_repr.
+  apply Int64.eqm_sym;
+  apply Int64.eqm_unsigned_repr.
 Qed.
 
 (* ----------------------------------------------------------------- *)
-
-(** Euclidean division identity with commuted multiplication. *)
-Lemma div_mod_eq : forall a b, b <> 0 -> a = a / b * b + a mod b.
-Proof. intros. pose proof (Z_div_mod_eq_full a b). lia. Qed.
 
 (** The schoolbook multiplication low-half identity (modular form):
     ((mid34 << 32) + (uint32_t)ll) mod 2^64  =  (a * b) mod 2^64
@@ -233,13 +328,27 @@ Proof.
   f_equal. lia.
 Qed.
 
-(* ----------------------------------------------------------------- *)
-
 Lemma body_secp256k1_umul128:
   semax_body Vprog Gprog
     f_secp256k1_umul128 secp256k1_umul128_spec.
 Proof.
   start_function.
+
+  (* Extract the Z values from the UInt64 records for arithmetic reasoning *)
+  unfold uint64_to_val in *.
+  set (av := u64_val a) in *.
+  set (bv := u64_val b) in *.
+  assert (Hav : 0 <= av <= Int64.max_unsigned).
+  { subst av.
+    destruct a as [v [Ha_lo Ha_hi]].
+    simpl.
+    rep_lia. }
+
+  assert (Hbv : 0 <= bv <= Int64.max_unsigned).
+  { subst bv.
+    destruct b as [v [Hb_lo Hb_hi]].
+    simpl.
+    rep_lia. }
 
   (* Local tactic: normalise Int.unsigned_repr_eq and shift-by-32 *)
   Ltac norm_shru :=
@@ -253,33 +362,33 @@ Proof.
   (* Normalize: resolve unsigned_repr_eq, shift amounts, shru *)
   autorewrite with norm in *.
   norm_shru.
-  rewrite !(Int64_shru_32 a) in * by lia.
-  rewrite !(Int64_shru_32 b) in * by lia.
+  rewrite !(Int64_shru_32 av) in * by lia.
+  rewrite !(Int64_shru_32 bv) in * by lia.
   autorewrite with norm in *.
 
   (* Introduce Z-level abbreviations for the 32-bit halves *)
-  set (a_lo := a mod Int.modulus) in *.
-  set (a_hi := a / Int.modulus) in *.
-  set (b_lo := b mod Int.modulus) in *.
-  set (b_hi := b / Int.modulus) in *.
+  set (a_lo := av mod Int.modulus) in *.
+  set (a_hi := av / Int.modulus) in *.
+  set (b_lo := bv mod Int.modulus) in *.
+  set (b_hi := bv / Int.modulus) in *.
   deadvars!.
 
   (* Half-word range bounds *)
   assert (Ha_lo : 0 <= a_lo <= Int.max_unsigned).
   { subst a_lo. unfold Int.max_unsigned.
-    pose proof (Z.mod_pos_bound a Int.modulus ltac:(rep_lia)). rep_lia. }
+    pose proof (Z.mod_pos_bound av Int.modulus ltac:(rep_lia)). rep_lia. }
   assert (Hb_lo : 0 <= b_lo <= Int.max_unsigned).
   { subst b_lo. unfold Int.max_unsigned.
-    pose proof (Z.mod_pos_bound b Int.modulus ltac:(rep_lia)). rep_lia. }
+    pose proof (Z.mod_pos_bound bv Int.modulus ltac:(rep_lia)). rep_lia. }
   assert (Ha_hi : 0 <= a_hi <= Int.max_unsigned).
   { subst a_hi. split; [apply Z.div_pos; rep_lia|].
     unfold Int.max_unsigned.
-    enough (a / Int.modulus < Int.modulus) by lia.
+    enough (av / Int.modulus < Int.modulus) by lia.
     apply Z.div_lt_upper_bound; rep_lia. }
   assert (Hb_hi : 0 <= b_hi <= Int.max_unsigned).
   { subst b_hi. split; [apply Z.div_pos; rep_lia|].
     unfold Int.max_unsigned.
-    enough (b / Int.modulus < Int.modulus) by lia.
+    enough (bv / Int.modulus < Int.modulus) by lia.
     apply Z.div_lt_upper_bound; rep_lia. }
 
   (* _mid34 = (ll >> 32) + (uint32_t)lh + (uint32_t)hl *)
@@ -287,13 +396,13 @@ Proof.
 
   (* Cross-product range bounds (needed for repr round-trips) *)
   assert (Hll : 0 <= a_lo * b_lo <= Int64.max_unsigned)
-    by (apply mul_32_32_range; lia).
+    by (apply mul_u32_range; lia).
   assert (Hlh : 0 <= a_lo * b_hi <= Int64.max_unsigned)
-    by (apply mul_32_32_range; lia).
+    by (apply mul_u32_range; lia).
   assert (Hhl : 0 <= a_hi * b_lo <= Int64.max_unsigned)
-    by (apply mul_32_32_range; lia).
+    by (apply mul_u32_range; lia).
   assert (Hhh : 0 <= a_hi * b_hi <= Int64.max_unsigned)
-    by (apply mul_32_32_range; lia).
+    by (apply mul_u32_range; lia).
 
   autorewrite with norm in *.
   norm_shru.
@@ -337,48 +446,33 @@ Proof.
   set (lo_val := mid34 * Int.modulus + (a_lo * b_lo) mod Int.modulus) in *.
 
   (* --- Postcondition --- *)
-  entailer!; repeat split.
+  Exists (mul_64 a b).
+  unfold mul_64, u128_lo, u128_hi, uint64_to_val; simpl.
+  entailer!.
 
-  (* 0 <= umul128_lo a b *)
-  + unfold umul128_lo. apply Z.mod_pos_bound. lia.
-
-  (* umul128_lo a b <= max_unsigned *)
-  + unfold umul128_lo.
-    destruct (Z.mod_pos_bound (a * b) (2^64)); rep_lia.
-
-  (* 0 <= umul128_hi a b *)
-  + unfold umul128_hi. apply Z.div_pos; lia.
-
-  (* umul128_hi a b <= max_unsigned *)
-  + unfold umul128_hi.
-    apply Z.le_trans with (2^64 - 1); [|rep_lia].
-    apply Z.lt_le_pred.
-    apply Z.div_lt_upper_bound; [lia|].
-    apply Z.lt_le_trans with ((a + 1) * (b + 1)); try lia.
-    apply Z.mul_le_mono_nonneg; rep_lia.
-
-  (* return value = umul128_lo a b *)
+  (* Goal 1: lo_val represents (av * bv) mod 2^64 *)
   + f_equal. apply Int64.eqm_samerepr.
     apply Int64.eqm_trans with (lo_val mod Int64.modulus);
       [apply eqmod_mod; rep_lia|].
-    subst lo_val mid34 a_lo a_hi b_lo b_hi.
-    unfold umul128_lo.
+    subst lo_val mid34 a_lo a_hi b_lo b_hi av bv.
     change Int64.modulus with (Int.modulus * Int.modulus).
-    change (2^64) with (Int.modulus * Int.modulus).
     rewrite umul128_lo_correct by assumption.
+    unfold limb64. simpl Z.of_nat. rewrite Z.mul_0_r, Z.div_1_r.
+    change (Int.modulus * Int.modulus) with Int64.modulus.
     apply Int64.eqm_refl.
 
-  (* *hi = umul128_hi a b *)
-  + auto.
-  + destruct H1 as [_ [_ [? _]]]; auto.
-  + destruct H1 as [_ [_ [_ [? _]]]]; auto.
-  + unfold data_at, field_at in H3; rewrite at_offset_eq in H3; simpl in H3;
-    destruct H3 as [_ H3]; rewrite at_offset_eq.
-    replace (umul128_hi a b) with hi_val; [exact H3|].
-    subst hi_val mid34 a_lo a_hi b_lo b_hi.
-    unfold umul128_hi.
-    change (2^64) with (Int.modulus * Int.modulus).
-    apply umul128_hi_correct; assumption.
+  (* Goal 2: hi_val represents limb64 (av * bv) 1 *)
+  + apply derives_refl'. f_equal. f_equal.
+    apply Int64.eqm_samerepr.
+    subst hi_val mid34 a_lo a_hi b_lo b_hi av bv.
+    rewrite umul128_hi_correct by assumption.
+    unfold limb64. simpl Z.of_nat. change (64 * 1)%Z with 64%Z.
+    change (2^64) with Int64.modulus.
+    apply Int64.eqm_sym.
+    change (Int.modulus * Int.modulus) with Int64.modulus.
+    apply Int64.eqm_sym.
+    apply eqmod_mod.
+    rep_lia.
 Qed.
 
 (* ================================================================= *)
@@ -391,96 +485,332 @@ Lemma body_secp256k1_u128_mul:
     f_secp256k1_u128_mul secp256k1_u128_mul_spec.
 Proof.
   start_function.
-  (* Split the uninitialised struct *r into field_at_ for .lo and .hi *)
+
+  (* Decompose uninitialised struct into .lo and .hi fields *)
   unfold data_at_, field_at_.
   unfold_data_at (field_at sh (Tstruct __191 noattr) [] _ r_ptr).
-
-  (* We need field_compatible to form &r->hi for the forward_call *)
   assert_PROP (field_compatible (Tstruct __191 noattr) [StructField _hi] r_ptr)
     as Hfc by entailer!.
-
-  (* Convert the .hi field_at_ to data_at_ to match umul128's SEP pre *)
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
 
   (* r->lo = secp256k1_umul128(a, b, &r->hi) *)
   forward_call (a, b,
     field_address (Tstruct __191 noattr) [StructField _hi] r_ptr, sh).
-  forward. (* r->lo = return value *)
+  Intros vret.
+  forward. (* r->lo = _t'1 *)
 
-  (* Reassemble the struct for the postcondition *)
-  unfold u128_val.
+  (* Provide witness and reassemble struct *)
+  Exists vret.
+  entailer!.
+  unfold uint128_to_val.
   unfold_data_at (data_at sh (Tstruct __191 noattr) _ r_ptr).
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
-  entailer!.
+  cancel.
 Qed.
 
 (* ================================================================= *)
-(** ** muladd *)
+(** ** muladd / muladd_fast helper lemmas *)
 
-Lemma umul128_lo_range : forall a b,
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  0 <= umul128_lo a b <= Int64.max_unsigned.
-Proof.
-  intros a b Ha Hb.
-  unfold umul128_lo. split.
-  - apply Z.mod_pos_bound; lia.
-  - assert (0 <= (a * b) mod 2^64 < 2^64).
-    { apply Z.mod_pos_bound; lia. }
-    rep_lia.
-Qed.
-
-Lemma umul128_hi_range : forall a b,
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  0 <= umul128_hi a b <= Int64.max_unsigned.
-Proof.
-  intros a b Ha Hb.
-  unfold umul128_hi. split.
-  - apply Z.div_pos; nia.
-  - assert (0 <= (a * b) / 2^64 < 2^64).
-    { split.
-      - apply Z.div_pos; [nia | lia].
-      - apply Z.div_lt_upper_bound; [lia|].
-        unfold Int64.max_unsigned in *; simpl in *; nia. }
-    rep_lia.
-Qed.
-
-Lemma mod_64_range : forall x,
-  0 <= x mod Int64.modulus <= Int64.max_unsigned.
-Proof.
-  intros.
-  assert (H : 0 <= x mod Int64.modulus < Int64.modulus).
-  { apply Z.mod_pos_bound; rep_lia. }
-  rep_lia.
-Qed.
-
-(** Unsigned addition carry detection: comparing [c0 + tl < tl] after
-    wrapping gives 0 when no overflow occurred, 1 otherwise. *)
-Lemma carry_detect_b2z : forall c0 tl,
+(** Carry detection via [ltu]: [b2z (repr(c0+tl) < repr(tl))] equals
+    the arithmetic carry (0 if no wrap, 1 if wrap). *)
+Lemma ltu_carry_b2z : forall c0 tl,
   0 <= c0 <= Int64.max_unsigned ->
   0 <= tl <= Int64.max_unsigned ->
   Z.b2z (Int64.ltu (Int64.repr (c0 + tl)) (Int64.repr tl)) =
   (if c0 + tl <? Int64.modulus then 0 else 1).
 Proof.
   intros.
-  destruct (c0 + tl <? Int64.modulus) eqn:Hcarry.
-  + (* no overflow: c0 + tl fits, so repr is identity and (c0+tl) >= tl *)
-    apply Z.ltb_lt in Hcarry.
+  destruct (c0 + tl <? Int64.modulus) eqn:Hcarry;
+    [apply Z.ltb_lt in Hcarry | apply Z.ltb_ge in Hcarry];
     unfold Int64.ltu.
+  - (* no overflow *)
     rewrite !Int64.unsigned_repr by rep_lia.
-    rewrite zlt_false by lia.
-    reflexivity.
-  + (* overflow: c0 + tl wraps to (c0+tl - 2^64), which is < tl *)
-    apply Z.ltb_ge in Hcarry.
-    unfold Int64.ltu.
+    rewrite zlt_false by lia. reflexivity.
+  - (* overflow *)
     rewrite (Int64.unsigned_repr tl) by rep_lia.
     rewrite Int64.unsigned_repr_eq.
     replace ((c0 + tl) mod Int64.modulus) with (c0 + tl - Int64.modulus)
       by (symmetry; apply Zmod_unique with 1; rep_lia).
-    rewrite zlt_true by rep_lia.
-    reflexivity.
+    rewrite zlt_true by rep_lia. reflexivity.
 Qed.
+
+(**
+    These lemmas justify the limb-by-limb addition used in [muladd] and
+    [muladd_fast].  The core identity is
+
+      [(a + b) / M  =  a/M  +  b/M  +  (a mod M + b mod M) / M]
+
+    where the last term is the carry (0 or 1).  From this we derive
+    that each 64-bit limb of [a + b] equals the corresponding limb
+    sum plus carry-in, modulo [2^64]. *)
+
+(** Carry decomposition of integer division. *)
+Lemma Z_div_add_carry : forall a b M,
+  0 < M -> 0 <= a -> 0 <= b ->
+  (a + b) / M = a / M + b / M + (a mod M + b mod M) / M.
+Proof.
+  intros.
+  rewrite (Z.div_mod a M) at 1 by lia.
+  rewrite (Z.div_mod b M) at 1 by lia.
+  replace (M * (a / M) + a mod M + (M * (b / M) + b mod M))
+    with ((a / M + b / M) * M + (a mod M + b mod M)) by ring.
+  rewrite Z.div_add_l by lia.
+  reflexivity.
+Qed.
+
+(** The carry from adding two residues is 0 or 1. *)
+Lemma carry_value : forall a b M,
+  0 < M -> 0 <= a -> 0 <= b ->
+  (a mod M + b mod M) / M = if a mod M + b mod M <? M then 0 else 1.
+Proof.
+  intros.
+  destruct (a mod M + b mod M <? M) eqn:Hc.
+  - apply Z.ltb_lt in Hc.
+    apply Z.div_small.
+    split; [apply Z.add_nonneg_nonneg; apply Z.mod_pos_bound |]; lia.
+  - apply Z.ltb_ge in Hc.
+    symmetry. apply Z.div_unique with (r := a mod M + b mod M - M).
+    + assert (a mod M < M) by (apply Z.mod_pos_bound; lia).
+      assert (b mod M < M) by (apply Z.mod_pos_bound; lia). lia.
+    + lia.
+Qed.
+
+(** Limb 0: sum of low limbs = low limb of sum (mod 2^64).
+    No incoming carry for the lowest digit. *)
+Lemma limb_add_0 : forall a b,
+  0 <= a -> 0 <= b ->
+  Int64.eqm (limb64 a 0 + limb64 b 0)
+             (limb64 (a + b) 0).
+Proof.
+  intros. unfold limb64, Int64.eqm.
+  replace Int64.modulus with (2^64) by reflexivity.
+  simpl Z.of_nat. rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r.
+  rewrite Z.add_mod by lia.
+  apply Zbits.eqmod_mod; lia.
+Qed.
+
+(** Limb 1: sum of middle limbs + carry-in = middle limb of sum (mod 2^64). *)
+Lemma limb_add_1 : forall a b,
+  0 <= a -> 0 <= b ->
+  Int64.eqm (limb64 a 1 + (limb64 b 1 +
+               (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1)))
+             (limb64 (a + b) 1).
+Proof.
+  intros. unfold limb64. simpl Z.of_nat.
+  rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r, Z.mul_1_r.
+  unfold Int64.eqm. replace Int64.modulus with (2^64) by reflexivity.
+  replace ((a + b) / 2^64) with
+    (a / 2^64 + b / 2^64 + (a mod 2^64 + b mod 2^64) / 2^64)
+    by (symmetry; apply Z_div_add_carry; lia).
+  rewrite carry_value by lia.
+  apply Zbits.eqmod_trans with
+    (y := a / 2^64 + b / 2^64 +
+          (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1)).
+  - (* strip mod from LHS components *)
+    replace (a / 2^64 + b / 2^64 +
+             (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1))
+      with (a / 2^64 + (b / 2^64 +
+             (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1))) by lia.
+    apply Zbits.eqmod_add; [| apply Zbits.eqmod_add;
+      [| apply Zbits.eqmod_refl]];
+    apply Zbits.eqmod_sym; apply Zbits.eqmod_mod; lia.
+  - apply Zbits.eqmod_mod; lia.
+Qed.
+
+(* ================================================================= *)
+(** ** muladd *)
+
+(** Limb 2: sum of high limbs + carry-in = high limb of sum (mod 2^64).
+    Requires [b < 2^128] (i.e. b fits in 2 limbs) so that [b/(M*M) = 0]. *)
+Lemma limb_add_2 : forall a b,
+  0 <= a -> 0 <= b -> b < 2^128 ->
+  Int64.eqm (limb64 a 2 + (if limb64 a 1 + limb64 b 1 +
+               (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1) <? 2^64 then 0 else 1))
+             (limb64 (a + b) 2).
+Proof.
+  intros a b Ha Hb Hb128. unfold limb64. simpl Z.of_nat.
+  rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r, Z.mul_1_r.
+  replace (64 * 2) with (64 + 64) by lia.
+  rewrite Z.pow_add_r by lia.
+  set (M := (2^64)%Z).
+  unfold Int64.eqm. replace Int64.modulus with M by (unfold M; reflexivity).
+  (* b < M*M, so b/(M*M) = 0 -- this is the key insight *)
+  assert (Hbdiv : b / (M * M) = 0).
+  { apply Z.div_small. unfold M in *. lia. }
+  (* Decompose (a+b)/(M*M) via Z_div_add_carry *)
+  replace ((a + b) / (M * M)) with
+    (a / (M * M) + b / (M * M) +
+     (a mod (M * M) + b mod (M * M)) / (M * M))
+    by (symmetry; apply Z_div_add_carry; [unfold M; lia | lia | lia]).
+  rewrite Hbdiv, Z.add_0_r.
+  (* Name the limb-0 and limb-1 components *)
+  set (la0 := a mod M).
+  set (lb0 := b mod M).
+  set (la1 := a / M mod M).
+  set (lb1 := b / M mod M).
+  assert (Hla0 : 0 <= la0 < M) by (unfold la0, M; apply Z.mod_pos_bound; lia).
+  assert (Hlb0 : 0 <= lb0 < M) by (unfold lb0, M; apply Z.mod_pos_bound; lia).
+  assert (Hla1 : 0 <= la1 < M) by (unfold la1, M; apply Z.mod_pos_bound; lia).
+  assert (Hlb1 : 0 <= lb1 < M) by (unfold lb1, M; apply Z.mod_pos_bound; lia).
+  (* Normalize the LHS carry expression *)
+  set (carry2 := if la0 + lb0 <? M
+                 then if la1 + lb1 <? M then 0 else 1
+                 else if la1 + lb1 + 1 <? M then 0 else 1).
+  assert (Hcarry2_lhs :
+    (if la1 + lb1 + (if la0 + lb0 <? M then 0 else 1) <? M then 0 else 1) = carry2). {
+    unfold carry2.
+    destruct (la0 + lb0 <? M) eqn:Ec0; destruct (la1 + lb1 <? M) eqn:Ec1;
+    replace (la1 + lb1 + 0) with (la1 + lb1) by lia ||
+    replace (la1 + lb1 + 1) with (la1 + lb1 + 1) by lia;
+    try rewrite Ec1; try reflexivity;
+    destruct (la1 + lb1 + 1 <? M); reflexivity.
+  }
+  rewrite Hcarry2_lhs.
+  (* Decompose a mod (M*M) and b mod (M*M) into limb pairs *)
+  replace (a mod (M * M)) with (la0 + la1 * M)
+    by (unfold la0, la1, M; rewrite Zmod_recombine by lia; ring).
+  replace (b mod (M * M)) with (lb0 + lb1 * M)
+    by (unfold lb0, lb1, M; rewrite Zmod_recombine by lia; ring).
+  (* Show the cross-word carry equals carry2 *)
+  assert (Hcarry_val : (la0 + la1 * M + (lb0 + lb1 * M)) / (M * M) = carry2). {
+    unfold carry2.
+    destruct (la0 + lb0 <? M) eqn:Ec0; destruct (la1 + lb1 <? M) eqn:Ec1.
+    - apply Z.ltb_lt in Ec0; apply Z.ltb_lt in Ec1.
+      apply Z.div_small; lia.
+    - apply Z.ltb_lt in Ec0; apply Z.ltb_ge in Ec1.
+      symmetry; apply Z.div_unique with (r := la0 + lb0 + (la1 + lb1 - M) * M); lia.
+    - apply Z.ltb_ge in Ec0; apply Z.ltb_lt in Ec1.
+      destruct (la1 + lb1 + 1 <? M) eqn:Ec1'.
+      + apply Z.ltb_lt in Ec1'. apply Z.div_small; lia.
+      + apply Z.ltb_ge in Ec1'.
+        symmetry; apply Z.div_unique with (r := la0 + lb0 - M + (la1 + lb1 + 1 - M) * M); lia.
+    - apply Z.ltb_ge in Ec0; apply Z.ltb_ge in Ec1.
+      destruct (la1 + lb1 + 1 <? M) eqn:Ec1'.
+      + apply Z.ltb_lt in Ec1'.
+        symmetry; apply Z.div_unique with (r := la0 + lb0 - M + (la1 + lb1 + 1) * M); lia.
+      + apply Z.ltb_ge in Ec1'.
+        symmetry; apply Z.div_unique with (r := la0 + lb0 - M + (la1 + lb1 + 1 - M) * M); lia.
+  }
+  rewrite Hcarry_val.
+  (* Goal: eqmod M (a/(M*M) mod M + carry2) ((a/(M*M) + carry2) mod M)
+     Follow the limb_add_1 pattern: transit through the unwrapped sum *)
+  apply Zbits.eqmod_trans with (y := a / (M * M) + carry2).
+  - apply Zbits.eqmod_add.
+    + apply Zbits.eqmod_sym. apply Zbits.eqmod_mod. lia.
+    + apply Zbits.eqmod_refl.
+  - apply Zbits.eqmod_mod. lia.
+Qed.
+
+(* ================================================================= *)
+(** ** C-to-math bridge lemmas
+
+    The C code for [muladd] propagates carries through three
+    64-bit limbs using [c0 < tl] as a carry-detect idiom.
+    After VST symbolic execution, the postcondition contains nested
+    [Int64.ltu] / [Int.signed] / [Int.repr] expressions.
+
+    These bridge lemmas translate each limb's C-level expression
+    into the pure-math [limb_add_N] form in a single step, keeping
+    the body proofs to one [apply] per limb. *)
+
+(** Bridge for limb 1: normalize [ltu]/[signed]/[repr] into the
+    carry form that [limb_add_1] uses.
+
+    The C code adds [th + (c0 < tl)] to [c1].  After VST, the goal
+    has [limb64 acc 1 + (limb64 prod 1 + Int.signed(Int.repr(Z.b2z(
+    Int64.ltu ...))))].  This lemma consumes that exact shape. *)
+Lemma muladd_limb1 : forall acc_v prod,
+  0 <= acc_v -> 0 <= prod ->
+  Int64.eqm
+    (limb64 acc_v 1 + (limb64 prod 1 +
+      Int.signed (Int.repr
+        (Z.b2z (Int64.ltu
+          (Int64.repr (limb64 acc_v 0 + limb64 prod 0))
+          (Int64.repr (limb64 prod 0)))))))
+    (limb64 (acc_v + prod) 1).
+Proof.
+  intros acc_v prod Hacc Hprod.
+  pose proof (limb64_u64_range acc_v 0) as Hla0.
+  pose proof (limb64_u64_range prod 0) as Hlb0.
+  rewrite (ltu_carry_b2z (limb64 acc_v 0) (limb64 prod 0)) by assumption.
+  assert (Hinner :
+    Int.signed (Int.repr (if limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus then 0 else 1))
+    = (if limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus then 0 else 1)).
+  { destruct (limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus); reflexivity. }
+  rewrite Hinner.
+  replace Int64.modulus with (2^64) by reflexivity.
+  apply limb_add_1; lia.
+Qed.
+
+(** Bridge for limb 2: normalize two levels of [ltu]/[signed]/[repr]
+    into the carry form that [limb_add_2] uses.
+
+    Takes [av] and [bv] as separate u64 factors (not just their
+    product) because we need [(av * bv) / 2^64 <= 2^64 - 2] to
+    prove the intermediate carry fits in a u64. *)
+Lemma muladd_limb2 : forall acc_v av bv,
+  0 <= acc_v ->
+  0 <= av < 2^64 -> 0 <= bv < 2^64 ->
+  let prod := av * bv in
+  let c0_carry :=
+    Z.b2z (Int64.ltu
+      (Int64.repr (limb64 acc_v 0 + limb64 prod 0))
+      (Int64.repr (limb64 prod 0))) in
+  let th := limb64 prod 1 + Int.signed (Int.repr c0_carry) in
+  Int64.eqm
+    (limb64 acc_v 2 +
+      Int.signed (Int.repr
+        (Z.b2z (Int64.ltu
+          (Int64.repr (limb64 acc_v 1 + th))
+          (Int64.repr th)))))
+    (limb64 (acc_v + prod) 2).
+Proof.
+  intros acc_v av bv Hacc Hav Hbv prod c0_carry th.
+  (* Range facts *)
+  pose proof (limb64_u64_range acc_v 0) as Hla0.
+  pose proof (limb64_u64_range prod 0) as Hlb0.
+  pose proof (limb64_u64_range acc_v 1) as Hla1.
+  pose proof (limb64_u64_range prod 1) as Hlb1.
+  (* Normalize inner carry *)
+  subst c0_carry th.
+  rewrite (ltu_carry_b2z (limb64 acc_v 0) (limb64 prod 0)) by assumption.
+  assert (Hinner :
+    Int.signed (Int.repr
+      (if limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus then 0 else 1))
+    = (if limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus then 0 else 1)).
+  { destruct (limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus); reflexivity. }
+  rewrite Hinner. clear Hinner.
+  set (c0' := if limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus then 0 else 1).
+  assert (Hc0' : 0 <= c0' <= 1)
+    by (subst c0'; destruct (limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus); lia).
+  (* limb64 prod 1 + c0' fits in u64 because (av*bv)/2^64 <= 2^64-2 *)
+  assert (Hlb1' : limb64 prod 1 <= Int64.max_unsigned - 1).
+  { unfold limb64. simpl Z.of_nat. change (64 * 1)%Z with 64.
+    subst prod. change (2^64) with Int64.modulus.
+    pose proof (mul_u64_hi_le av bv Hav Hbv).
+    change (2^64) with Int64.modulus in H.
+    rewrite Z.mod_small by (split; [apply Z.div_pos; rep_lia | rep_lia]).
+    rep_lia. }
+  assert (Hth : 0 <= limb64 prod 1 + c0' <= Int64.max_unsigned)
+    by (subst c0'; destruct (limb64 acc_v 0 + limb64 prod 0 <? Int64.modulus); lia).
+  (* Normalize outer carry *)
+  rewrite (ltu_carry_b2z (limb64 acc_v 1) (limb64 prod 1 + c0'))
+    by (try assumption; lia).
+  assert (Houter :
+    Int.signed (Int.repr
+      (if limb64 acc_v 1 + (limb64 prod 1 + c0') <? Int64.modulus then 0 else 1))
+    = (if limb64 acc_v 1 + (limb64 prod 1 + c0') <? Int64.modulus then 0 else 1)).
+  { destruct (limb64 acc_v 1 + (limb64 prod 1 + c0') <? Int64.modulus); reflexivity. }
+  rewrite Houter. clear Houter.
+  replace (limb64 acc_v 1 + (limb64 prod 1 + c0'))
+    with (limb64 acc_v 1 + limb64 prod 1 + c0') by lia.
+  replace Int64.modulus with (2^64) by reflexivity.
+  subst c0'.
+  apply limb_add_2; [lia | subst prod; nia | subst prod; nia].
+Qed.
+
+(* ================================================================= *)
+(** ** muladd *)
 
 Lemma body_muladd:
   semax_body Vprog Gprog f_muladd muladd_spec.
@@ -489,12 +819,18 @@ Proof.
 
   (* secp256k1_u128_mul(&t, a, b) *)
   forward_call.
+
+  Intros vret.
+
   (* tl = secp256k1_u128_to_u64(&t) *)
   forward_call.
-  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  Intros hi.
+
   (* th = secp256k1_u128_hi_u64(&t) *)
   forward_call.
-  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  Intros lo.
 
   (* acc->c0 += tl *)
   forward.
@@ -510,55 +846,30 @@ Proof.
   forward.
   forward.
 
-  assert (Hab_mod: 0 <= (a * b) mod 2 ^ 64 <= Int64.max_unsigned). {
-    split.
-    + apply Z.mod_pos_bound; lia.
-    + apply mod_64_range.
-  }
-
-  assert (Hab_div: 0 <= a * b / 2 ^ 64 <= Int64.max_unsigned). {
-    split.
-    + apply Z.div_pos; nia.
-    + enough (a * b / 2 ^ 64 < 2 ^ 64) by rep_lia.
-      apply Z.div_lt_upper_bound; try lia.
-      unfold Int64.max_unsigned in *;
-      simpl in *.
-      nia.
-  }
-
-  (* th + carry fits in 64 bits because a*b <= (2^64-1)^2. *)
-  assert (Hth_carry: 0 <= a * b / 2 ^ 64 + 1 <= Int64.max_unsigned).
-  { split; try lia.
-    enough (a * b / 2^64 < 2^64 - 1) by rep_lia.
-    apply Z.div_lt_upper_bound; try lia.
-    apply Z.le_lt_trans with ((2^64 - 1) * (2^64 - 1)); try rep_lia.
-    apply Z.mul_le_mono_nonneg; rep_lia. }
-
-  (* --- Postcondition --- *)
+  Exists (acc_muladd acc a b ltac:(lia)).
   entailer!.
-  unfold acc_val, muladd_c0, muladd_c1, muladd_c2, muladd_th, umul128_lo, umul128_hi.
+
+  (* --- Postcondition: C struct = acc_to_val of mathematical sum --- *)
+  pose proof (acc_range acc) as Hacc.
+  pose proof (u64_range a) as Ha.
+  pose proof (u64_range b) as Hb.
   apply derives_refl'.
-  f_equal; f_equal; f_equal.
-  + (* c0: repr (c0 + lo) = repr ((c0 + lo) mod 2^64) *)
+  f_equal.
+  unfold acc_to_val, acc_muladd. simpl.
+  unfold u128_lo, u128_hi, mul_64.
+  simpl u64_val. simpl u128_val.
+  f_equal; f_equal.
+  + (* limb 0 *)
     apply Int64.eqm_samerepr.
-    apply Zbits.eqmod_mod; lia.
-  + (* c1: repr (c1 + th + carry0) = repr ((c1 + th + carry0) mod 2^64) *)
+    apply limb_add_0; lia.
+  + (* limb 1 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    rewrite carry_detect_b2z; try assumption.
-    destruct (_ <? _);
-    apply Zbits.eqmod_mod; lia.
-  + (* c2: repr (c2 + carry1) = repr ((c2 + carry1) mod 2^64) *)
+    apply muladd_limb1; lia.
+  + (* limb 2 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    rewrite carry_detect_b2z; try assumption.
-    - rewrite carry_detect_b2z; try assumption.
-      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
-      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
-      apply Zbits.eqmod_mod; lia.
-    - rewrite carry_detect_b2z; try assumption.
-      rewrite Int.signed_repr by (destruct (_ <? _); rep_lia).
-      destruct (_ <? _); lia.
+    apply (muladd_limb2 (acc_val acc) (u64_val a) (u64_val b)); lia.
 Qed.
 
 (* ================================================================= *)
@@ -571,12 +882,18 @@ Proof.
 
   (* secp256k1_u128_mul(&t, a, b) *)
   forward_call.
+
+  Intros vret.
+
   (* tl = secp256k1_u128_to_u64(&t) *)
   forward_call.
-  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  Intros hi.
+
   (* th = secp256k1_u128_hi_u64(&t) *)
   forward_call.
-  { split; [apply umul128_lo_range | apply umul128_hi_range]; rep_lia. }
+
+  Intros lo.
 
   (* acc->c0 += tl *)
   forward.
@@ -588,26 +905,33 @@ Proof.
   forward.
   forward.
 
-  assert (Hab_mod: 0 <= (a * b) mod 2 ^ 64 <= Int64.max_unsigned). {
-    split.
-    + apply Z.mod_pos_bound; lia.
-    + apply mod_64_range.
-  }
-
-  (* --- Postcondition --- *)
+  Exists (acc_muladd acc a b ltac:(lia)).
   entailer!.
-  unfold acc_val, muladd_c0, muladd_c1, muladd_th, umul128_lo, umul128_hi.
+
+  (* --- Postcondition: C struct = acc_to_val of mathematical sum --- *)
+  pose proof (acc_range acc) as Hacc.
+  pose proof (u64_range a) as Ha.
+  pose proof (u64_range b) as Hb.
   apply derives_refl'.
-  f_equal; f_equal; f_equal.
-  - (* c0: repr (c0 + lo) = repr ((c0 + lo) mod 2^64) *)
+  f_equal.
+  unfold acc_to_val, acc_muladd. simpl.
+  unfold u128_lo, u128_hi, mul_64.
+  simpl u64_val. simpl u128_val.
+  f_equal; f_equal.
+  + (* limb 0 *)
     apply Int64.eqm_samerepr.
-    apply Zbits.eqmod_mod; lia.
-  - (* c1: repr (c1 + th + carry) = repr ((c1 + th + carry) mod 2^64) *)
+    apply limb_add_0; lia.
+  + (* limb 1 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    rewrite carry_detect_b2z; try assumption.
-    destruct (_ <? _);
-    apply Zbits.eqmod_mod; lia.
+    apply muladd_limb1; lia.
+  + (* limb 2: acc + a*b < 2^128 so limb 2 is 0 on both sides *)
+    f_equal.
+    apply Int64.eqm_samerepr.
+    unfold limb64. simpl Z.of_nat.
+    unfold Int64.eqm. replace Int64.modulus with (2^64) by reflexivity.
+    rewrite !Z.div_small by lia.
+    apply Zbits.eqmod_refl.
 Qed.
 
 (* ================================================================= *)
@@ -617,8 +941,37 @@ Lemma body_extract:
   semax_body Vprog Gprog f_extract extract_spec.
 Proof.
   start_function.
-  repeat forward.
+
+  forward.
+  forward.
+  forward.
+  forward.
+  forward.
+  forward.
+  forward.
+
+  (* Witnesses: n = acc_lo acc, acc' = acc_shift acc *)
+  Exists (acc_lo acc) (acc_shift acc).
   entailer!.
+
+  (* --- Postcondition: C struct = acc_to_val (acc_shift acc) --- *)
+  pose proof (acc_range acc) as Hacc.
+
+  apply derives_refl'.
+  f_equal.
+  unfold acc_to_val.
+  (* Normalize acc_val (acc_shift acc) to acc_val acc / 2^64 *)
+  replace (acc_val (acc_shift acc)) with (acc_val acc / 2^64)
+    by (unfold acc_shift; reflexivity).
+  f_equal; f_equal; f_equal. 
+  + (* limb 0 of shifted = limb 1 of original *)
+    symmetry. apply limb64_shift. lia.
+  + (* limb 1 of shifted = limb 2 of original *)
+    f_equal. symmetry. apply limb64_shift. lia.
+  + (* limb 2 of shifted = 0 *)
+    rewrite limb64_shift by lia.
+    rewrite (limb64_high_zero (acc_val acc) 2) by lia.
+    reflexivity. 
 Qed.
 
 (* ================================================================= *)
@@ -628,9 +981,39 @@ Lemma body_extract_fast:
   semax_body Vprog Gprog f_extract_fast extract_fast_spec.
 Proof.
   start_function.
-  repeat forward.
+
+  forward.
+  forward.
+  forward.
+  forward.
+  forward.
+
+  (* Witnesses: n = acc_lo acc, acc' = acc_shift acc *)
+  Exists (acc_lo acc) (acc_shift acc).
   entailer!.
-Qed. 
+
+  (* --- Postcondition: C struct = acc_to_val (acc_shift acc) --- *)
+  pose proof (acc_range acc) as Hacc.
+
+  apply derives_refl'.
+  f_equal.
+  unfold acc_to_val.
+  replace (acc_val (acc_shift acc)) with (acc_val acc / 2^64)
+    by (unfold acc_shift; reflexivity).
+  simpl snd.
+  f_equal; f_equal; f_equal. 
+  + (* limb 0 of shifted = limb 1 of original *)
+    symmetry. apply limb64_shift. lia.
+  + (* limb 1 of shifted = 0 (since acc < 2^128, limb 2 = 0) *)
+    rewrite limb64_shift by lia.
+    rewrite (limb64_high_zero (acc_val acc) 1) by lia.
+    reflexivity.
+  + (* limb 2 of shifted = limb 2 of original (both 0) *)
+    rewrite limb64_shift by lia.
+    rewrite (limb64_high_zero (acc_val acc) 1) by lia.
+    rewrite (limb64_high_zero (acc_val acc) 2) by lia.
+    reflexivity.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
@@ -645,222 +1028,6 @@ Proof.
   destruct l; [| simpl in Hlen; lia].
   reflexivity.
 Qed.
-
-
-(** The product of two 64-bit unsigned integers fits in 128 bits. *)
-Lemma mul_64_64_lt_128 : forall a b,
-  0 <= a < 2^64 ->
-  0 <= b < 2^64 ->
-  a * b < 2^128.
-Proof.
-  intros a b Ha Hb.
-  assert (a * b <= (2^64 - 1) * (2^64 - 1))
-    by (apply Z.mul_le_mono_nonneg; lia).
-  lia.
-Qed.
-
-(** muladd_c0/c1/c2 always produce values in [0, Int64.max_unsigned]. *)
-Lemma muladd_c0_range : forall c0 a b,
-  0 <= muladd_c0 c0 a b <= Int64.max_unsigned.
-Proof. intros; unfold muladd_c0; apply mod_64_range. Qed.
-
-Lemma muladd_c1_range : forall c0 c1 a b,
-  0 <= muladd_c1 c0 c1 a b <= Int64.max_unsigned.
-Proof. intros; unfold muladd_c1; apply mod_64_range. Qed.
-
-Lemma muladd_c2_range : forall c0 c1 c2 a b,
-  0 <= muladd_c2 c0 c1 c2 a b <= Int64.max_unsigned.
-Proof. intros; unfold muladd_c2; apply mod_64_range. Qed.
-
-(** Solve range goals of the form [0 <= muladd_cX ...] or [muladd_cX ... <= _]. *)
-Ltac solve_muladd_range :=
-  try match goal with
-  | |- 0 <= muladd_c0 _ _ _             => apply muladd_c0_range
-  | |- muladd_c0 _ _ _ <= _             => apply muladd_c0_range
-  | |- 0 <= muladd_c1 _ _ _ _           => apply muladd_c1_range
-  | |- muladd_c1 _ _ _ _ <= _           => apply muladd_c1_range
-  | |- 0 <= muladd_c2 _ _ _ _ _         => apply muladd_c2_range
-  | |- muladd_c2 _ _ _ _ _ <= _         => apply muladd_c2_range
-  end.
-
-(** [muladd] preserves the mathematical value of the accumulator:
-      acc_full after = acc_full before + a * b provided the 
-      accumulator doesn't overflow (c2 doesn't wrap). *)
-Lemma acc_full_muladd : forall c0 c1 c2 a b,
-  0 <= c0 <= Int64.max_unsigned ->
-  0 <= c1 <= Int64.max_unsigned ->
-  0 <= c2 <= Int64.max_unsigned ->
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  acc_full c0 c1 c2 + a * b < 2^192 ->
-  acc_full (muladd_c0 c0 a b) (muladd_c1 c0 c1 a b) (muladd_c2 c0 c1 c2 a b)
-  = acc_full c0 c1 c2 + a * b.
-Proof.
-  intros c0 c1 c2 a b Hc0 Hc1 Hc2 Ha Hb Hacc.
-  unfold acc_full in *; unfold muladd_c2, muladd_c1, muladd_c0, muladd_th.
-  change Int64.max_unsigned with (2^64 - 1) in *.
-
-  (* --- Establish the bounds we will need in every case --- *)
-
-  (* The low 64 bits of a*b *)
-  assert (Hab_mod : 0 <= (a * b) mod 2^64 < 2^64)
-    by (apply Z.mod_pos_bound; lia).
-  (* The high 64 bits of a*b.  Because a,b <= 2^64-1,
-     a*b <= (2^64-1)^2 = 2^128-2^65+1, so a*b/2^64 <= 2^64-2.
-     This means a*b/2^64 + 1 (the carry case) still fits in 64 bits. *)
-  assert (Hab_div : 0 <= (a * b) / 2^64 <= 2^64 - 2).
-  { split; [apply Z.div_pos; lia|].
-    enough ((a * b) / 2^64 < 2^64 - 1) by lia.
-    apply Z.div_lt_upper_bound; [lia|]. nia. }
-  (* The Euclidean decomposition, needed by [lia] to recombine
-     (a*b) mod 2^64 and (a*b) / 2^64 back into a*b. *)
-  pose proof (Z.div_mod (a * b) (2^64) ltac:(lia)) as Hab_decomp.
-
-  (* --- Case-split on the two carry flags --- *)
-
-  destruct (c0 + (a * b) mod 2 ^ 64 <? 2 ^ 64) eqn:Hc0_carry;
-    [apply Z.ltb_lt in Hc0_carry | apply Z.ltb_ge in Hc0_carry].
-
-  + (* ---- c0 + lo did NOT overflow ---- *)
-    destruct (c1 + (a * b / 2 ^ 64 + 0) <? 2 ^ 64) eqn:Hc1_carry;
-      [apply Z.ltb_lt in Hc1_carry | apply Z.ltb_ge in Hc1_carry].
-
-    * (* Case 1: no carry from c0, no carry from c1.
-         All three mods are identities (sums stay < 2^64). *)
-      rewrite (Z.mod_small (c0 + _)) by lia.
-      rewrite (Z.mod_small (c1 + _)) by lia.
-      rewrite (Z.mod_small (c2 + 0)) by lia.
-      lia.
-
-    * (* Case 2: no carry from c0, carry from c1.
-         c1 mod wraps (subtract 2^64), c2 absorbs +1. *)
-      rewrite (Z.mod_small (c0 + _)) by lia.
-      replace ((c1 + (a * b / 2 ^ 64 + 0)) mod 2 ^ 64)
-        with (c1 + (a * b / 2 ^ 64 + 0) - 2^64)
-        by (symmetry; apply Zmod_unique with 1; lia).
-      (* c2+1 < 2^64 follows from the accumulator bound + the
-         carry meaning c1 + hi >= 2^64. *)
-      rewrite (Z.mod_small (c2 + 1)) by nia.
-      lia.
-
-  + (* ---- c0 + lo DID overflow ---- *)
-    destruct (c1 + (a * b / 2 ^ 64 + 1) <? 2 ^ 64) eqn:Hc1_carry;
-      [apply Z.ltb_lt in Hc1_carry | apply Z.ltb_ge in Hc1_carry].
-
-    * (* Case 3: carry from c0, no carry from c1.
-         c0 mod wraps, c1 absorbs +1, c2 unchanged. *)
-      replace ((c0 + (a * b) mod 2 ^ 64) mod 2 ^ 64)
-        with (c0 + (a * b) mod 2 ^ 64 - 2^64)
-        by (symmetry; apply Zmod_unique with 1; lia).
-      rewrite (Z.mod_small (c1 + _)) by lia.
-      rewrite (Z.mod_small (c2 + 0)) by lia.
-      lia.
-
-    * (* Case 4: carry from both c0 and c1.
-         Both c0 and c1 mods wrap, c2 absorbs +1. *)
-      replace ((c0 + (a * b) mod 2 ^ 64) mod 2 ^ 64)
-        with (c0 + (a * b) mod 2 ^ 64 - 2^64)
-        by (symmetry; apply Zmod_unique with 1; lia).
-      replace ((c1 + (a * b / 2 ^ 64 + 1)) mod 2 ^ 64)
-        with (c1 + (a * b / 2 ^ 64 + 1) - 2^64)
-        by (symmetry; apply Zmod_unique with 1; lia).
-      rewrite (Z.mod_small (c2 + 1)) by nia.
-      lia.
-Qed.
-
-(** [muladd_fast] is the same as [muladd] but leaves c2 untouched.
-    The precondition c0 + c1*2^64 + a*b < 2^128 guarantees that c1
-    never overflows, so there are only two cases (carry from c0 or not)
-    instead of four. *)
-Lemma acc_full_muladd_fast : forall c0 c1 c2 a b,
-  0 <= c0 <= Int64.max_unsigned ->
-  0 <= c1 <= Int64.max_unsigned ->
-  0 <= c2 <= Int64.max_unsigned ->
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  c0 + c1 * 2^64 + a * b < 2^128 ->
-  acc_full (muladd_c0 c0 a b) (muladd_c1 c0 c1 a b) c2
-  = acc_full c0 c1 c2 + a * b.
-Proof.
-  intros c0 c1 c2 a b Hc0 Hc1 Hc2 Ha Hb Hacc.
-  (* Expose the raw arithmetic: two [(... + ...) mod 2^64] limbs,
-     c2 is untouched. *)
-  unfold acc_full in *; unfold muladd_c1, muladd_c0, muladd_th.
-  change Int64.max_unsigned with (2^64 - 1) in *.
-
-  (* --- Establish the bounds we will need in every case --- *)
-
-  assert (Hab_mod : 0 <= (a * b) mod 2^64 < 2^64)
-    by (apply Z.mod_pos_bound; lia).
-  assert (Hab_div : 0 <= (a * b) / 2^64 <= 2^64 - 2).
-  { split; [apply Z.div_pos; lia|].
-    enough ((a * b) / 2^64 < 2^64 - 1) by lia.
-    apply Z.div_lt_upper_bound; [lia|]. nia. }
-  pose proof (Z.div_mod (a * b) (2^64) ltac:(lia)) as Hab_decomp.
-
-  (* --- Case-split on the single carry flag --- *)
-
-  destruct (c0 + (a * b) mod 2 ^ 64 <? 2 ^ 64) eqn:Hc0_carry;
-    [apply Z.ltb_lt in Hc0_carry | apply Z.ltb_ge in Hc0_carry].
-
-  + (* Case 1: c0 + lo did NOT overflow.
-       Both mods are identities. *)
-    rewrite (Z.mod_small (c0 + _)) by lia.
-    rewrite (Z.mod_small (c1 + _)) by lia.
-    lia.
-
-  + (* Case 2: c0 + lo DID overflow.
-       c0 mod wraps (subtract 2^64), c1 absorbs the +1.
-       c1 + th still fits because c0 + c1*2^64 + a*b < 2^128. *)
-    replace ((c0 + (a * b) mod 2 ^ 64) mod 2 ^ 64)
-      with (c0 + (a * b) mod 2 ^ 64 - 2^64)
-      by (symmetry; apply Zmod_unique with 1; lia).
-    rewrite (Z.mod_small (c1 + _)) by lia.
-    lia.
-Qed.
-
-(** Simpler: acc_full after extract is just c1 + c2 * 2^64. *)
-Lemma acc_full_shift : forall c1 c2,
-  acc_full c1 c2 0 = c1 + c2 * 2^64.
-Proof.
-  intros. unfold acc_full. lia.
-Qed.
-
-(** acc_full after extract_fast: (c0,c1,c2) → (c1,0,c2). *)
-Lemma acc_full_shift_fast : forall c1 c2,
-  acc_full c1 0 c2 = c1 + c2 * 2^128.
-Proof.
-  intros. unfold acc_full. lia.
-Qed.
-
-(** Proof outline for [secp256k1_scalar_mul_512].
-
-    The C function computes a 4×4-limb schoolbook multiplication using a
-    192-bit accumulator (c0, c1, c2).  Each round adds cross-products
-    via [muladd] / [muladd_fast], then shifts the low 64 bits out via
-    [extract] / [extract_fast].
-
-    We track the mathematical value [acc_full c0 c1 c2 = c0 + c1·2^64 + c2·2^128]
-    as an invariant through every operation:
-
-    1. After each [muladd(a_i, b_j)]:
-         acc_full_after = acc_full_before + a_i * b_j
-       (proved by [acc_full_muladd]).  This gives a chain of equalities:
-         Hacc_rN_0, Hacc_rN_1, …
-
-    2. After each [extract(&l8[k])]:
-         The output limb is c0.  The new accumulator is (c1, c2, 0)
-         with [acc_full c1 c2 0 = c1 + c2·2^64] (by [acc_full_shift]).
-         We record this as Hacc_r(N+1)_init and bound it by the
-         previous round's total (Hacc_r(N+1)_init_bound).
-
-    3. Overflow (no-wrap) obligations for each [muladd] are discharged
-       by rewriting with the chain back to the round's starting value,
-       then solving with [nia].
-
-    4. Range goals [0 <= muladd_cX … <= max_unsigned] generated by
-       [forward_call] are solved by [solve_muladd_range] (all three
-       components are mod 2^64 results). *)
 
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
@@ -914,25 +1081,25 @@ Proof.
   clear H H0 H1 H2.
 
   (* Product bounds: every ai*bj < 2^128 *)
-  assert (Hmul_a0b0 : a0 * b0 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a0b1 : a0 * b1 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a0b2 : a0 * b2 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a0b3 : a0 * b3 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a1b0 : a1 * b0 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a1b1 : a1 * b1 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a1b2 : a1 * b2 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a1b3 : a1 * b3 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a2b0 : a2 * b0 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a2b1 : a2 * b1 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a2b2 : a2 * b2 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a2b3 : a2 * b3 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a3b0 : a3 * b0 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a3b1 : a3 * b1 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a3b2 : a3 * b2 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
-  assert (Hmul_a3b3 : a3 * b3 < 2^128) by (apply mul_64_64_lt_128; rep_lia).
+  assert (Hmul_a0b0 : a0 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a0b1 : a0 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a0b2 : a0 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a0b3 : a0 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a1b0 : a1 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a1b1 : a1 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a1b2 : a1 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a1b3 : a1 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a2b0 : a2 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a2b1 : a2 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a2b2 : a2 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a2b3 : a2 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a3b0 : a3 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a3b1 : a3 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a3b2 : a3 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  assert (Hmul_a3b3 : a3 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
 
   (* a0 = a->d[0], b0 = b->d[0] *)
-  forward. 
+  forward.
   forward.
 
   (* muladd_fast(&acc, a0, b0) *)
@@ -942,11 +1109,11 @@ Proof.
   assert (Hacc_r0 : acc_full (muladd_c0 0 a0 b0) (muladd_c1 0 0 a0 b0) 0
     = a0 * b0).
   { rewrite (acc_full_muladd_fast 0 0 0 a0 b0); try lia.
-    unfold acc_full. 
+    unfold acc_full.
     lia. }
 
 
-  (* Establish field_compatible for the l8 array — needed for address matching *)
+  (* Establish field_compatible for the l8 array -- needed for address matching *)
   assert_PROP (field_compatible (tarray tulong 8) [] l8_ptr) as Hfc by entailer!.
 
   (* extract_fast(&acc, &l8[0]) *)
@@ -956,23 +1123,23 @@ Proof.
                 0, Tsh, sh_l).
   { (* parameter matching *)
     entailer!.
-    simpl firstn. 
+    simpl firstn.
     f_equal; f_equal.
     rewrite field_address_offset by auto with field_compatible.
     simpl nested_field_offset.
     rewrite isptr_offset_val_zero; auto. }
   { (* frame: split l8[0] out of the 8-element array *)
     rewrite (arr_field_address tulong 8 l8_ptr 0 Hfc) by lia.
-    simpl Z.mul. 
+    simpl Z.mul.
     rewrite isptr_offset_val_zero by (eapply field_compatible_isptr; eauto).
     rewrite (split2_data_at__Tarray_app 1 8 sh_l tulong l8_ptr) by lia.
     rewrite data__at_singleton_array_eq.
     cancel. }
   { (* bounds *)
-     split; [unfold muladd_c0 | unfold muladd_c1]; apply mod_64_range. }
-  
-  deadvars!; simpl. 
-    
+     split; [unfold muladd_c0 | unfold muladd_c1]; apply mod_u64_range. }
+
+  deadvars!; simpl.
+
   (* Abbreviate the extracted value for l8[0] *)
   set (r0_c0 := muladd_c0 0 a0 b0) in *.
 
@@ -985,15 +1152,15 @@ Proof.
 
   (* Bound: r1_c0_in < 2^64 (since it's a mod 2^64 result) *)
   assert (Hr1_c0_in_range : 0 <= r1_c0_in <= Int64.max_unsigned).
-  { subst r1_c0_in. unfold muladd_c1. apply mod_64_range. }
+  { subst r1_c0_in. unfold muladd_c1. apply mod_u64_range. }
 
-  (* Bound: acc_full before extract_fast was a0*b0, so r1_c0_in ≤ a0*b0 *)
+  (* Bound: acc_full before extract_fast was a0*b0, so r1_c0_in <= a0*b0 *)
   assert (Hacc_r1_init_bound : acc_full r1_c0_in 0 0 <= a0 * b0).
   { rewrite Hacc_r1_init.
     (* From Hacc_r0: muladd_c0 0 a0 b0 + r1_c0_in * 2^64 = a0*b0 *)
     assert (Hacc_r0' := Hacc_r0).
-    unfold acc_full in Hacc_r0'. 
-    (* muladd_c0 0 a0 b0 ≥ 0 *)
+    unfold acc_full in Hacc_r0'.
+    (* muladd_c0 0 a0 b0 >= 0 *)
     assert (0 <= muladd_c0 0 a0 b0) by (unfold muladd_c0; apply Z.mod_pos_bound; lia).
     lia. }
 
@@ -1004,9 +1171,9 @@ Proof.
   (* muladd(&acc, a0, b1) *)
   forward_call (v_acc, a0, b1,
                 r1_c0_in, 0, 0, Tsh).
-      
-  deadvars!; simpl. 
-  
+
+  deadvars!; simpl.
+
   (* Abbreviate accumulator state after muladd(a0, b1) *)
   set (r1_c0_mid := muladd_c0 r1_c0_in a0 b1) in *.
   set (r1_c1_mid := muladd_c1 r1_c0_in 0 a0 b1) in *.
@@ -1029,8 +1196,8 @@ Proof.
     subst r1_c0_mid r1_c1_mid r1_c2_mid.
     repeat split; try solve_muladd_range. }
 
-  deadvars!; simpl. 
-        
+  deadvars!; simpl.
+
   (* Abbreviate accumulator state after muladd(a1, b0) *)
   set (r1_c0 := muladd_c0 r1_c0_mid a1 b0) in *.
   set (r1_c1 := muladd_c1 r1_c0_mid r1_c1_mid a1 b0) in *.
@@ -1041,9 +1208,9 @@ Proof.
     = acc_full r1_c0_mid r1_c1_mid r1_c2_mid + a1 * b0).
   { subst r1_c0 r1_c1 r1_c2.
     apply acc_full_muladd; try lia.
-    - subst r1_c0_mid. unfold muladd_c0. apply mod_64_range.
-    - subst r1_c1_mid. unfold muladd_c1. apply mod_64_range.
-    - subst r1_c2_mid. unfold muladd_c2. apply mod_64_range. }
+    - subst r1_c0_mid. unfold muladd_c0. apply mod_u64_range.
+    - subst r1_c1_mid. unfold muladd_c1. apply mod_u64_range.
+    - subst r1_c2_mid. unfold muladd_c2. apply mod_u64_range. }
 
   (* Full chain for round 1: acc_full = r1_c0_in + a0*b1 + a1*b0 *)
   assert (Hacc_r1 : acc_full r1_c0 r1_c1 r1_c2
@@ -1059,30 +1226,30 @@ Proof.
     rewrite data__at_singleton_array_eq.
     rewrite (arr_field_address0 tulong 8 l8_ptr 1 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 1 Hfc) by lia.
-    cancel. } 
+    cancel. }
   { (* 2: bounds *)
     repeat split;
     subst r1_c0 r1_c1 r1_c2;
-    try (unfold muladd_c0; apply mod_64_range);
-    try (unfold muladd_c1; apply mod_64_range);
-    try (unfold muladd_c2; apply mod_64_range). }
+    try (unfold muladd_c0; apply mod_u64_range);
+    try (unfold muladd_c1; apply mod_u64_range);
+    try (unfold muladd_c2; apply mod_u64_range). }
 
   (* After extract, acc = (r1_c1, r1_c2, 0) *)
   assert (Hacc_r2_init : acc_full r1_c1 r1_c2 0 = r1_c1 + r1_c2 * 2^64).
   { apply acc_full_shift. }
 
-  (* Bound: acc_full(r1_c1, r1_c2, 0) ≤ acc_full(r1_c0, r1_c1, r1_c2) < the round 1 total *)
+  (* Bound: acc_full(r1_c1, r1_c2, 0) <= acc_full(r1_c0, r1_c1, r1_c2) < the round 1 total *)
   assert (Hacc_r2_init_bound : acc_full r1_c1 r1_c2 0 <= r1_c0_in + a0 * b1 + a1 * b0).
   { rewrite Hacc_r2_init.
     assert (acc_full r1_c0 r1_c1 r1_c2 = r1_c0_in + a0 * b1 + a1 * b0) by exact Hacc_r1.
     unfold acc_full in H.
     assert (0 <= r1_c0) by (subst r1_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
     lia. }
-    
+
   (* a0 = a->d[0], b2 = b->d[2] *)
   forward.
   forward.
-  
+
   (* muladd(&acc, a0, b2) *)
   forward_call (v_acc, a0, b2,
                 r1_c1, r1_c2, 0, Tsh).
@@ -1101,8 +1268,8 @@ Proof.
     = acc_full r1_c1 r1_c2 0 + a0 * b2).
   { subst r2_c0_0 r2_c1_0 r2_c2_0.
     apply acc_full_muladd; try lia.
-    - subst r1_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r1_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r1_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r1_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* a1 = a->d[1], b1 = b->d[1] *)
   forward.
@@ -1126,9 +1293,9 @@ Proof.
     = acc_full r2_c0_0 r2_c1_0 r2_c2_0 + a1 * b1).
   { subst r2_c0_1 r2_c1_1 r2_c2_1.
     apply acc_full_muladd; try lia.
-    - subst r2_c0_0. unfold muladd_c0. apply mod_64_range.
-    - subst r2_c1_0. unfold muladd_c1. apply mod_64_range.
-    - subst r2_c2_0. unfold muladd_c2. apply mod_64_range. }
+    - subst r2_c0_0. unfold muladd_c0. apply mod_u64_range.
+    - subst r2_c1_0. unfold muladd_c1. apply mod_u64_range.
+    - subst r2_c2_0. unfold muladd_c2. apply mod_u64_range. }
 
   (* a2 = a->d[2], b0 = b->d[0] *)
   forward.
@@ -1152,9 +1319,9 @@ Proof.
     = acc_full r2_c0_1 r2_c1_1 r2_c2_1 + a2 * b0).
   { subst r2_c0 r2_c1 r2_c2.
     apply acc_full_muladd; try lia.
-    - subst r2_c0_1. unfold muladd_c0. apply mod_64_range.
-    - subst r2_c1_1. unfold muladd_c1. apply mod_64_range.
-    - subst r2_c2_1. unfold muladd_c2. apply mod_64_range. }
+    - subst r2_c0_1. unfold muladd_c0. apply mod_u64_range.
+    - subst r2_c1_1. unfold muladd_c1. apply mod_u64_range.
+    - subst r2_c2_1. unfold muladd_c2. apply mod_u64_range. }
 
   (* Full chain for round 2 *)
   assert (Hacc_r2 : acc_full r2_c0 r2_c1 r2_c2
@@ -1186,9 +1353,9 @@ Proof.
     cancel. }
   { repeat split;
     subst r2_c0 r2_c1 r2_c2;
-    try (unfold muladd_c0; apply mod_64_range);
-    try (unfold muladd_c1; apply mod_64_range);
-    try (unfold muladd_c2; apply mod_64_range). }
+    try (unfold muladd_c0; apply mod_u64_range);
+    try (unfold muladd_c1; apply mod_u64_range);
+    try (unfold muladd_c2; apply mod_u64_range). }
 
   (* After extract, acc = (r2_c1, r2_c2, 0) *)
   assert (Hacc_r3_init : acc_full r2_c1 r2_c2 0 = r2_c1 + r2_c2 * 2^64).
@@ -1225,8 +1392,8 @@ Proof.
     = acc_full r2_c1 r2_c2 0 + a0 * b3).
   { subst r3_c0_0 r3_c1_0 r3_c2_0.
     apply acc_full_muladd; try lia.
-    - subst r2_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r2_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r2_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r2_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* a1 = a->d[1], b2 = b->d[2] *)
   forward.
@@ -1250,9 +1417,9 @@ Proof.
     = acc_full r3_c0_0 r3_c1_0 r3_c2_0 + a1 * b2).
   { subst r3_c0_1 r3_c1_1 r3_c2_1.
     apply acc_full_muladd; try lia.
-    - subst r3_c0_0. unfold muladd_c0. apply mod_64_range.
-    - subst r3_c1_0. unfold muladd_c1. apply mod_64_range.
-    - subst r3_c2_0. unfold muladd_c2. apply mod_64_range. }
+    - subst r3_c0_0. unfold muladd_c0. apply mod_u64_range.
+    - subst r3_c1_0. unfold muladd_c1. apply mod_u64_range.
+    - subst r3_c2_0. unfold muladd_c2. apply mod_u64_range. }
 
   (* a2 = a->d[2], b1 = b->d[1] *)
   forward.
@@ -1276,9 +1443,9 @@ Proof.
     = acc_full r3_c0_1 r3_c1_1 r3_c2_1 + a2 * b1).
   { subst r3_c0_2 r3_c1_2 r3_c2_2.
     apply acc_full_muladd; try lia.
-    - subst r3_c0_1. unfold muladd_c0. apply mod_64_range.
-    - subst r3_c1_1. unfold muladd_c1. apply mod_64_range.
-    - subst r3_c2_1. unfold muladd_c2. apply mod_64_range. }
+    - subst r3_c0_1. unfold muladd_c0. apply mod_u64_range.
+    - subst r3_c1_1. unfold muladd_c1. apply mod_u64_range.
+    - subst r3_c2_1. unfold muladd_c2. apply mod_u64_range. }
 
   (* a3 = a->d[3], b0 = b->d[0] *)
   forward.
@@ -1302,9 +1469,9 @@ Proof.
     = acc_full r3_c0_2 r3_c1_2 r3_c2_2 + a3 * b0).
   { subst r3_c0 r3_c1 r3_c2.
     apply acc_full_muladd; try lia.
-    - subst r3_c0_2. unfold muladd_c0. apply mod_64_range.
-    - subst r3_c1_2. unfold muladd_c1. apply mod_64_range.
-    - subst r3_c2_2. unfold muladd_c2. apply mod_64_range. }
+    - subst r3_c0_2. unfold muladd_c0. apply mod_u64_range.
+    - subst r3_c1_2. unfold muladd_c1. apply mod_u64_range.
+    - subst r3_c2_2. unfold muladd_c2. apply mod_u64_range. }
 
   (* Full chain for round 3 *)
   assert (Hacc_r3 : acc_full r3_c0 r3_c1 r3_c2
@@ -1327,9 +1494,9 @@ Proof.
     cancel. }
   { repeat split;
     subst r3_c0 r3_c1 r3_c2;
-    try (unfold muladd_c0; apply mod_64_range);
-    try (unfold muladd_c1; apply mod_64_range);
-    try (unfold muladd_c2; apply mod_64_range). }
+    try (unfold muladd_c0; apply mod_u64_range);
+    try (unfold muladd_c1; apply mod_u64_range);
+    try (unfold muladd_c2; apply mod_u64_range). }
 
   (* After extract, acc = (r3_c1, r3_c2, 0) *)
   assert (Hacc_r4_init : acc_full r3_c1 r3_c2 0 = r3_c1 + r3_c2 * 2^64).
@@ -1368,8 +1535,8 @@ Proof.
     = acc_full r3_c1 r3_c2 0 + a1 * b3).
   { subst r4_c0_0 r4_c1_0 r4_c2_0.
     apply acc_full_muladd; try lia.
-    - subst r3_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r3_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r3_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r3_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* a2 = a->d[2], b2 = b->d[2] *)
   forward.
@@ -1393,9 +1560,9 @@ Proof.
     = acc_full r4_c0_0 r4_c1_0 r4_c2_0 + a2 * b2).
   { subst r4_c0_1 r4_c1_1 r4_c2_1.
     apply acc_full_muladd; try lia.
-    - subst r4_c0_0. unfold muladd_c0. apply mod_64_range.
-    - subst r4_c1_0. unfold muladd_c1. apply mod_64_range.
-    - subst r4_c2_0. unfold muladd_c2. apply mod_64_range. }
+    - subst r4_c0_0. unfold muladd_c0. apply mod_u64_range.
+    - subst r4_c1_0. unfold muladd_c1. apply mod_u64_range.
+    - subst r4_c2_0. unfold muladd_c2. apply mod_u64_range. }
 
   (* a3 = a->d[3], b1 = b->d[1] *)
   forward.
@@ -1419,9 +1586,9 @@ Proof.
     = acc_full r4_c0_1 r4_c1_1 r4_c2_1 + a3 * b1).
   { subst r4_c0 r4_c1 r4_c2.
     apply acc_full_muladd; try lia.
-    - subst r4_c0_1. unfold muladd_c0. apply mod_64_range.
-    - subst r4_c1_1. unfold muladd_c1. apply mod_64_range.
-    - subst r4_c2_1. unfold muladd_c2. apply mod_64_range. }
+    - subst r4_c0_1. unfold muladd_c0. apply mod_u64_range.
+    - subst r4_c1_1. unfold muladd_c1. apply mod_u64_range.
+    - subst r4_c2_1. unfold muladd_c2. apply mod_u64_range. }
 
   (* Full chain for round 4 *)
   assert (Hacc_r4 : acc_full r4_c0 r4_c1 r4_c2
@@ -1444,9 +1611,9 @@ Proof.
     cancel. }
   { repeat split;
     subst r4_c0 r4_c1 r4_c2;
-    try (unfold muladd_c0; apply mod_64_range);
-    try (unfold muladd_c1; apply mod_64_range);
-    try (unfold muladd_c2; apply mod_64_range). }
+    try (unfold muladd_c0; apply mod_u64_range);
+    try (unfold muladd_c1; apply mod_u64_range);
+    try (unfold muladd_c2; apply mod_u64_range). }
 
   (* After extract, acc = (r4_c1, r4_c2, 0) *)
   assert (Hacc_r5_init : acc_full r4_c1 r4_c2 0 = r4_c1 + r4_c2 * 2^64).
@@ -1485,8 +1652,8 @@ Proof.
     = acc_full r4_c1 r4_c2 0 + a2 * b3).
   { subst r5_c0_0 r5_c1_0 r5_c2_0.
     apply acc_full_muladd; try lia.
-    - subst r4_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r4_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r4_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r4_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* a3 = a->d[3], b2 = b->d[2] *)
   forward.
@@ -1510,9 +1677,9 @@ Proof.
     = acc_full r5_c0_0 r5_c1_0 r5_c2_0 + a3 * b2).
   { subst r5_c0 r5_c1 r5_c2.
     apply acc_full_muladd; try lia.
-    - subst r5_c0_0. unfold muladd_c0. apply mod_64_range.
-    - subst r5_c1_0. unfold muladd_c1. apply mod_64_range.
-    - subst r5_c2_0. unfold muladd_c2. apply mod_64_range. }
+    - subst r5_c0_0. unfold muladd_c0. apply mod_u64_range.
+    - subst r5_c1_0. unfold muladd_c1. apply mod_u64_range.
+    - subst r5_c2_0. unfold muladd_c2. apply mod_u64_range. }
 
   (* Full chain for round 5 *)
   assert (Hacc_r5 : acc_full r5_c0 r5_c1 r5_c2
@@ -1535,9 +1702,9 @@ Proof.
     cancel. }
   { repeat split;
     subst r5_c0 r5_c1 r5_c2;
-    try (unfold muladd_c0; apply mod_64_range);
-    try (unfold muladd_c1; apply mod_64_range);
-    try (unfold muladd_c2; apply mod_64_range). }
+    try (unfold muladd_c0; apply mod_u64_range);
+    try (unfold muladd_c1; apply mod_u64_range);
+    try (unfold muladd_c2; apply mod_u64_range). }
 
   (* After extract, acc = (r5_c1, r5_c2, 0) *)
   assert (Hacc_r6_init : acc_full r5_c1 r5_c2 0 = r5_c1 + r5_c2 * 2^64).
@@ -1558,7 +1725,7 @@ Proof.
   forward.
   forward.
 
-  (* The accumulator + a3*b3 fits in 128 bits — needed for muladd_fast *)
+  (* The accumulator + a3*b3 fits in 128 bits -- needed for muladd_fast *)
   assert (Hr6_bound : r5_c1 + r5_c2 * 2^64 + a3 * b3 < 2^128).
   { (* Strategy: bound each carry tightly using carry_k * 2^64 <= total_k,
        which follows from acc_full c0 c1 c2 = total and c0 >= 0.
@@ -1739,17 +1906,17 @@ Proof.
   (* muladd_fast(&acc, a3, b3) *)
   forward_call (v_acc, a3, b3, r5_c1, r5_c2, 0, Tsh).
   { repeat split; try lia.
-    - subst r5_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_64_range. 
-    - subst r5_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r5_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r5_c2. unfold muladd_c2. apply mod_u64_range.
+    - subst r5_c2. unfold muladd_c2. apply mod_u64_range.
+    - subst r5_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* Track acc_full through round 6 *)
   assert (Hacc_r6_0 : acc_full (muladd_c0 r5_c1 a3 b3) (muladd_c1 r5_c1 r5_c2 a3 b3) 0
     = acc_full r5_c1 r5_c2 0 + a3 * b3).
   { rewrite (acc_full_muladd_fast r5_c1 r5_c2 0 a3 b3); try lia.
-    - subst r5_c1. unfold muladd_c1. apply mod_64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_64_range. }
+    - subst r5_c1. unfold muladd_c1. apply mod_u64_range.
+    - subst r5_c2. unfold muladd_c2. apply mod_u64_range. }
 
   (* Abbreviate accumulator state after muladd_fast(a3, b3) *)
   set (r6_c0 := muladd_c0 r5_c1 a3 b3) in *.
@@ -1774,10 +1941,10 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 6 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 6 Hfc) by lia.
     cancel. }
-  { split; [subst r6_c0; unfold muladd_c0; apply mod_64_range
-           | subst r6_c1; unfold muladd_c1; apply mod_64_range]. }
-           
-  deadvars!. 
+  { split; [subst r6_c0; unfold muladd_c0; apply mod_u64_range
+           | subst r6_c1; unfold muladd_c1; apply mod_u64_range]. }
+
+  deadvars!.
 
   (* After extract_fast, acc = (r6_c1, 0, 0) *)
   (* l8[7] = acc.c0: first read acc.c0 into temp *)
@@ -1799,15 +1966,15 @@ Proof.
   change tulong with (nested_field_type (tarray tulong 8) (SUB 7)).
   rewrite <- field_at__data_at_.
   forward. (* l8[7] = acc.c0 *)
-  
-  
-  entailer!. 
+
+
+  entailer!.
 
   (* --- Postcondition: reassemble l8[0..7] into data_at (tarray tulong 8) --- *)
   (* Convert field_at for l8[7] into data_at at field_address *)
   rewrite (field_at_data_at sh_l (tarray tulong 8) (SUB 7)) by reflexivity.
   change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong.
-  
+
   (* Fold the 8 individual data_at into a single array data_at *)
   sep_apply (fold_data_at_tulong_8 sh_l l8_ptr
     (Vlong (Int64.repr r0_c0))
@@ -1819,18 +1986,18 @@ Proof.
     (Vlong (Int64.repr r6_c0))
     (Vlong (Int64.repr r6_c1))
     Hfc).
-  
+
   (* Now: data_at sh_l ... [Vlong ...; ...] l8_ptr |-- data_at sh_l ... (mul_512_result ...) l8_ptr *)
   (* Reduce to proving the two lists are equal *)
   apply derives_refl'.
   f_equal.
-  
-  unfold mul_512_result. 
+
+  unfold mul_512_result.
   simpl (seq 0 8). simpl map.
   repeat (f_equal; [f_equal; f_equal |]); f_equal; f_equal; f_equal.
 
   (* Clean context: keep only Z-level hypotheses *)
   clear - a0 a1 a2 a3 b0 b1 b2 b3
-          r0_c0 r1_c0 r2_c0 r3_c0 r4_c0 r5_c0 r6_c0 r6_c1. 
+          r0_c0 r1_c0 r2_c0 r3_c0 r4_c0 r5_c0 r6_c0 r6_c1.
 
 Admitted.

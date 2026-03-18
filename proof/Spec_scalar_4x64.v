@@ -19,19 +19,21 @@ Record UInt256 := mkUInt256 {
   u256_val : Z;
   u256_range : 0 <= u256_val < 2^256
 }.
+Coercion u256_val : UInt256 >-> Z.
 
 (** A 512-bit unsigned integer. *)
 Record UInt512 := mkUInt512 {
   u512_val : Z;
   u512_range : 0 <= u512_val < 2^512
 }.
+Coercion u512_val : UInt512 >-> Z.
 
 (* ================================================================= *)
 (** ** Operations *)
 
 (** 256 x 256 -> 512-bit multiplication. *)
 Program Definition mul_256 (a b : UInt256) : UInt512 :=
-  mkUInt512 (u256_val a * u256_val b) _.
+  mkUInt512 (a * b) _.
 Next Obligation.
   destruct a as [av [Ha0 Ha1]], b as [bv [Hb0 Hb1]]. simpl.
   split.
@@ -49,21 +51,21 @@ Definition limb64 (x : Z) (i : nat) : Z :=
 
 (** Represent a [UInt256] as a 4-limb C scalar struct. *)
 Definition uint256_to_val (x : UInt256) : reptype (Tstruct __185 noattr) :=
-  [ Vlong (Int64.repr (limb64 (u256_val x) 0));
-    Vlong (Int64.repr (limb64 (u256_val x) 1));
-    Vlong (Int64.repr (limb64 (u256_val x) 2));
-    Vlong (Int64.repr (limb64 (u256_val x) 3)) ].
+  [ Vlong (Int64.repr (limb64 x 0));
+    Vlong (Int64.repr (limb64 x 1));
+    Vlong (Int64.repr (limb64 x 2));
+    Vlong (Int64.repr (limb64 x 3)) ].
 
 (** Represent a [UInt512] as an 8-limb C array. *)
 Definition uint512_to_val (x : UInt512) : list val :=
-  [ Vlong (Int64.repr (limb64 (u512_val x) 0));
-    Vlong (Int64.repr (limb64 (u512_val x) 1));
-    Vlong (Int64.repr (limb64 (u512_val x) 2));
-    Vlong (Int64.repr (limb64 (u512_val x) 3));
-    Vlong (Int64.repr (limb64 (u512_val x) 4));
-    Vlong (Int64.repr (limb64 (u512_val x) 5));
-    Vlong (Int64.repr (limb64 (u512_val x) 6));
-    Vlong (Int64.repr (limb64 (u512_val x) 7)) ].
+  [ Vlong (Int64.repr (limb64 x 0));
+    Vlong (Int64.repr (limb64 x 1));
+    Vlong (Int64.repr (limb64 x 2));
+    Vlong (Int64.repr (limb64 x 3));
+    Vlong (Int64.repr (limb64 x 4));
+    Vlong (Int64.repr (limb64 x 5));
+    Vlong (Int64.repr (limb64 x 6));
+    Vlong (Int64.repr (limb64 x 7)) ].
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)

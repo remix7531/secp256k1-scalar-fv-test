@@ -6,8 +6,9 @@ Require Import VST.floyd.proofauto.
 Require Import compcert.lib.Zbits.
 Require Import scalar_4x64.scalar_4x64.
 Require Import scalar_4x64.Spec_scalar_4x64.
-Require Import scalar_4x64.Spec_scalar_4x64_internal.
-Require Import scalar_4x64.Array_fold_lemmas.
+Require Import scalar_4x64.Impl_scalar_4x64.
+Require Import scalar_4x64.Helper_array_fold.
+Require Import scalar_4x64.Helper_arithmetic.
 
 
 (* Load only the ATP plugin; "From Hammer Require Import Hammer" re-exports
@@ -1029,98 +1030,110 @@ Proof.
   reflexivity.
 Qed.
 
+(* Inhabitant instances needed by deadvars! *)
+Instance Inhabitant_UInt64_ : Inhabitant UInt64 := mkUInt64 0 ltac:(lia).
+Instance Inhabitant_UInt128_ : Inhabitant UInt128 := mkUInt128 0 ltac:(lia).
+Instance Inhabitant_Acc_ : Inhabitant Acc := mkAcc 0 ltac:(lia).
+Instance Inhabitant_UInt256_ : Inhabitant UInt256 := mkUInt256 0 ltac:(lia).
+Instance Inhabitant_UInt512_ : Inhabitant UInt512 := mkUInt512 0 ltac:(lia).
+
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
 Proof.
   start_function.
+  rename SH into Hsh_l_writable.
+  rename SH0 into Hsh_a_readable.
+  rename SH1 into Hsh_b_readable.
+  
+  (* Establish field_compatible for the l8 array - needed for address matching *)
+  assert_PROP (field_compatible (tarray tulong 8) [] l8_ptr) as Hfc by entailer!.
+
+  (* Provide Inhabitant witnesses for deadvars! *)
+  assert (Inh_UInt512 : UInt512) 
+    by exact (mkUInt512 0 ltac:(lia)).
+  assert (Inh_UInt64_Acc : (UInt64 * Acc)%type)
+    by exact (mkUInt64 0 ltac:(lia), mkAcc 0 ltac:(lia)).
 
   (* acc = {0, 0, 0} *)
   do 3 forward.
 
-  (* Need to fold the expanded acc struct into acc_val form for forward_call *)
+  (* Need to fold the expanded acc struct into acc_to_val form for forward_call *)
   autorewrite with norm.
-  change (Vlong (Int64.repr 0), (Vlong (Int64.repr 0), Vlong (Int64.repr 0)))
-    with (acc_val 0 0 0).
 
-  (* Abbreviate the scalar limbs for readability *)
-  set (a0 := Znth 0 a) in *.
-  set (a1 := Znth 1 a) in *.
-  set (a2 := Znth 2 a) in *.
-  set (a3 := Znth 3 a) in *.
-  set (b0 := Znth 0 b) in *.
-  set (b1 := Znth 1 b) in *.
-  set (b2 := Znth 2 b) in *.
-  set (b3 := Znth 3 b) in *.
+  (* Introduce the zero accumulator *)
+  assert (Hacc_init_range : 0 <= 0 < 2^192) by lia.
+  set (acc_init := mkAcc 0 Hacc_init_range).
+  replace (Vlong (Int64.repr 0), (Vlong (Int64.repr 0), Vlong (Int64.repr 0)))
+    with (acc_to_val acc_init)
+    by (unfold acc_to_val, acc_init; reflexivity).
 
-  (* Limb range facts *)
-  assert (Ha0 : 0 <= a0 <= Int64.max_unsigned)
-    by (subst a0; apply (proj1 (Forall_Znth a _) H1 0); lia).
-  assert (Ha1 : 0 <= a1 <= Int64.max_unsigned)
-    by (subst a1; apply (proj1 (Forall_Znth a _) H1 1); lia).
-  assert (Ha2 : 0 <= a2 <= Int64.max_unsigned)
-    by (subst a2; apply (proj1 (Forall_Znth a _) H1 2); lia).
-  assert (Ha3 : 0 <= a3 <= Int64.max_unsigned)
-    by (subst a3; apply (proj1 (Forall_Znth a _) H1 3); lia).
-  assert (Hb0 : 0 <= b0 <= Int64.max_unsigned)
-    by (subst b0; apply (proj1 (Forall_Znth b _) H2 0); lia).
-  assert (Hb1 : 0 <= b1 <= Int64.max_unsigned)
-    by (subst b1; apply (proj1 (Forall_Znth b _) H2 1); lia).
-  assert (Hb2 : 0 <= b2 <= Int64.max_unsigned)
-    by (subst b2; apply (proj1 (Forall_Znth b _) H2 2); lia).
-  assert (Hb3 : 0 <= b3 <= Int64.max_unsigned)
-    by (subst b3; apply (proj1 (Forall_Znth b _) H2 3); lia).
+  (* Name the UInt64 limbs for all 8 scalar components *)
+  set (a0 := u256_limb a 0).
+  set (a1 := u256_limb a 1).
+  set (a2 := u256_limb a 2).
+  set (a3 := u256_limb a 3).
+  set (b0 := u256_limb b 0).
+  set (b1 := u256_limb b 1).
+  set (b2 := u256_limb b 2).
+  set (b3 := u256_limb b 3).
 
-  (* Decompose a and b into their limbs *)
-  assert (Ha_eq : a = [a0; a1; a2; a3])
-    by (subst a0 a1 a2 a3; apply list_Z_Zlength_4; auto).
-  assert (Hb_eq : b = [b0; b1; b2; b3])
-    by (subst b0 b1 b2 b3; apply list_Z_Zlength_4; auto).
+  (* Range facts for all limbs — used throughout the proof *)
+  pose proof (u64_range a0) as Ha0.
+  pose proof (u64_range a1) as Ha1.
+  pose proof (u64_range a2) as Ha2.
+  pose proof (u64_range a3) as Ha3.
+  pose proof (u64_range b0) as Hb0.
+  pose proof (u64_range b1) as Hb1.
+  pose proof (u64_range b2) as Hb2.
+  pose proof (u64_range b3) as Hb3.
 
-  rewrite Ha_eq, Hb_eq in *.
-  clearbody a0 a1 a2 a3 b0 b1 b2 b3.
-  clear H H0 H1 H2.
+  (* All 16 limb products are bounded by (2^64-1)^2 *)
+  assert (Hprod_bound : forall x y : UInt64,
+    u64_val x * u64_val y <= (2^64 - 1) * (2^64 - 1))
+    by (intros; apply Z.mul_le_mono_nonneg;
+        pose proof (u64_range x); pose proof (u64_range y); lia).
+  pose proof (Hprod_bound a0 b0) as Hab00.
+  pose proof (Hprod_bound a0 b1) as Hab01.
+  pose proof (Hprod_bound a0 b2) as Hab02.
+  pose proof (Hprod_bound a0 b3) as Hab03.
+  pose proof (Hprod_bound a1 b0) as Hab10.
+  pose proof (Hprod_bound a1 b1) as Hab11.
+  pose proof (Hprod_bound a1 b2) as Hab12.
+  pose proof (Hprod_bound a1 b3) as Hab13.
+  pose proof (Hprod_bound a2 b0) as Hab20.
+  pose proof (Hprod_bound a2 b1) as Hab21.
+  pose proof (Hprod_bound a2 b2) as Hab22.
+  pose proof (Hprod_bound a2 b3) as Hab23.
+  pose proof (Hprod_bound a3 b0) as Hab30.
+  pose proof (Hprod_bound a3 b1) as Hab31.
+  pose proof (Hprod_bound a3 b2) as Hab32.
+  pose proof (Hprod_bound a3 b3) as Hab33.
+  clear Hprod_bound.
 
-  (* Product bounds: every ai*bj < 2^128 *)
-  assert (Hmul_a0b0 : a0 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a0b1 : a0 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a0b2 : a0 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a0b3 : a0 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a1b0 : a1 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a1b1 : a1 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a1b2 : a1 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a1b3 : a1 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a2b0 : a2 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a2b1 : a2 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a2b2 : a2 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a2b3 : a2 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a3b0 : a3 * b0 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a3b1 : a3 * b1 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a3b2 : a3 * b2 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
-  assert (Hmul_a3b3 : a3 * b3 < 2^128) by (apply mul_u64_lt_u128; rep_lia).
+  (* ===== Round 0: l8[0] = a0*b0 (1 product, uses muladd_fast + extract_fast) ===== *)
 
   (* a0 = a->d[0], b0 = b->d[0] *)
   forward.
   forward.
 
   (* muladd_fast(&acc, a0, b0) *)
-  forward_call (v_acc, a0, b0, 0, 0, 0, Tsh).
+  forward_call (v_acc, acc_init, a0, b0, Tsh).
+  { (* overflow: 0 + a0*b0 < 2^128 *)
+    apply mul_u64_lt_u128; lia. }
 
-  (* Track acc_full through round 0 *)
-  assert (Hacc_r0 : acc_full (muladd_c0 0 a0 b0) (muladd_c1 0 0 a0 b0) 0
-    = a0 * b0).
-  { rewrite (acc_full_muladd_fast 0 0 0 a0 b0); try lia.
-    unfold acc_full.
-    lia. }
+  (* Intro the accumulator after muladd_fast *)
+  Intros acc0.
+  rename H into Hacc0_post. (* acc_val acc0 = acc_val acc_init + a0*b0 *)
 
+  (* Track acc_val through round 0 *)
+  assert (Hacc0 : acc_val acc0 = u64_val a0 * u64_val b0).
+  { unfold acc_init in *. simpl in *. lia. }
+  clear Hacc0_post.
 
-  (* Establish field_compatible for the l8 array -- needed for address matching *)
-  assert_PROP (field_compatible (tarray tulong 8) [] l8_ptr) as Hfc by entailer!.
-
-  (* extract_fast(&acc, &l8[0]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 0] l8_ptr,
-                muladd_c0 0 a0 b0,
-                muladd_c1 0 0 a0 b0,
-                0, Tsh, sh_l).
+  (* extract_fast(&acc, &l8[0]) — precondition: acc < 2^128 *)
+  forward_call (v_acc, acc0,
+                field_address (tarray tulong 8) [ArraySubsc 0] l8_ptr,
+                Tsh, sh_l).
   { (* parameter matching *)
     entailer!.
     simpl firstn.
@@ -1135,202 +1148,123 @@ Proof.
     rewrite (split2_data_at__Tarray_app 1 8 sh_l tulong l8_ptr) by lia.
     rewrite data__at_singleton_array_eq.
     cancel. }
-  { (* bounds *)
-     split; [unfold muladd_c0 | unfold muladd_c1]; apply mod_u64_range. }
 
-  deadvars!; simpl.
+  (* Intro extracted limb and shifted accumulator *)
+  Intros vret.
+  rename H into Hr0_eq.     (* r0 = acc_lo acc0 *)
+  rename H0 into Hcarry0_eq.  (* acc_val carry0 = acc_val acc0 / 2^64 *)
+  destruct vret as [r0 carry0].
+  simpl fst in *. 
+  simpl snd in *. 
+  deadvars!.
 
-  (* Abbreviate the extracted value for l8[0] *)
-  set (r0_c0 := muladd_c0 0 a0 b0) in *.
+  (* Carry bound: acc_val carry0 <= 2^64 - 2 *)
+  assert (Hcarry0_ub : acc_val carry0 <= 2^64 - 2).
+  { rewrite Hcarry0_eq, Hacc0.
+    apply (Z.le_trans _ (((2^64 - 1) * (2^64 - 1)) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
 
-  (* Abbreviate the accumulator input to round 1 *)
-  set (r1_c0_in := muladd_c1 0 0 a0 b0) in *.
+  (* ===== Round 1: l8[1] = a0*b1 + a1*b0 (2 products, uses muladd + extract) ===== *)
 
-  (* After extract_fast, acc = (r1_c0_in, 0, 0) *)
-  assert (Hacc_r1_init : acc_full r1_c0_in 0 0 = r1_c0_in).
-  { unfold acc_full. lia. }
-
-  (* Bound: r1_c0_in < 2^64 (since it's a mod 2^64 result) *)
-  assert (Hr1_c0_in_range : 0 <= r1_c0_in <= Int64.max_unsigned).
-  { subst r1_c0_in. unfold muladd_c1. apply mod_u64_range. }
-
-  (* Bound: acc_full before extract_fast was a0*b0, so r1_c0_in <= a0*b0 *)
-  assert (Hacc_r1_init_bound : acc_full r1_c0_in 0 0 <= a0 * b0).
-  { rewrite Hacc_r1_init.
-    (* From Hacc_r0: muladd_c0 0 a0 b0 + r1_c0_in * 2^64 = a0*b0 *)
-    assert (Hacc_r0' := Hacc_r0).
-    unfold acc_full in Hacc_r0'.
-    (* muladd_c0 0 a0 b0 >= 0 *)
-    assert (0 <= muladd_c0 0 a0 b0) by (unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    lia. }
-
-  (* a1 = a->d[1], b1 = b->d[1] *)
+  (* a0 = a->d[0], b1 = b->d[1] *)
   forward.
   forward.
 
   (* muladd(&acc, a0, b1) *)
-  forward_call (v_acc, a0, b1,
-                r1_c0_in, 0, 0, Tsh).
+  forward_call (v_acc, carry0, a0, b1, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a0, b1) *)
-  set (r1_c0_mid := muladd_c0 r1_c0_in a0 b1) in *.
-  set (r1_c1_mid := muladd_c1 r1_c0_in 0 a0 b1) in *.
-  set (r1_c2_mid := muladd_c2 r1_c0_in 0 0 a0 b1) in *.
-
-  (* Track acc_full through muladd(a0, b1) *)
-  assert (Hacc_r1_0 : acc_full r1_c0_mid r1_c1_mid r1_c2_mid
-    = acc_full r1_c0_in 0 0 + a0 * b1).
-  { subst r1_c0_mid r1_c1_mid r1_c2_mid.
-    apply acc_full_muladd; try lia. }
+  Intros acc1a.
+  rename H into Hacc1a_eq.
+  deadvars!.
 
   (* a1 = a->d[1], b0 = b->d[0] *)
   forward.
   forward.
 
   (* muladd(&acc, a1, b0) *)
-  forward_call (v_acc, a1, b0,
-                r1_c0_mid, r1_c1_mid, r1_c2_mid, Tsh).
-  { (* range + overflow *)
-    subst r1_c0_mid r1_c1_mid r1_c2_mid.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc1a, a1, b0, Tsh).
 
-  deadvars!; simpl.
+  Intros acc1.
+  rename H into Hacc1_eq.
+  deadvars!.
 
-  (* Abbreviate accumulator state after muladd(a1, b0) *)
-  set (r1_c0 := muladd_c0 r1_c0_mid a1 b0) in *.
-  set (r1_c1 := muladd_c1 r1_c0_mid r1_c1_mid a1 b0) in *.
-  set (r1_c2 := muladd_c2 r1_c0_mid r1_c1_mid r1_c2_mid a1 b0) in *.
-
-  (* Track acc_full through muladd(a1, b0) *)
-  assert (Hacc_r1_1 : acc_full r1_c0 r1_c1 r1_c2
-    = acc_full r1_c0_mid r1_c1_mid r1_c2_mid + a1 * b0).
-  { subst r1_c0 r1_c1 r1_c2.
-    apply acc_full_muladd; try lia.
-    - subst r1_c0_mid. unfold muladd_c0. apply mod_u64_range.
-    - subst r1_c1_mid. unfold muladd_c1. apply mod_u64_range.
-    - subst r1_c2_mid. unfold muladd_c2. apply mod_u64_range. }
-
-  (* Full chain for round 1: acc_full = r1_c0_in + a0*b1 + a1*b0 *)
-  assert (Hacc_r1 : acc_full r1_c0 r1_c1 r1_c2
-    = r1_c0_in + a0 * b1 + a1 * b0).
-  { rewrite Hacc_r1_1, Hacc_r1_0, Hacc_r1_init. lia. }
+  (* Full chain for round 1 *)
+  assert (Hacc1 : acc_val acc1 =
+    acc_val carry0 + u64_val a0 * u64_val b1 + u64_val a1 * u64_val b0).
+  { rewrite Hacc1_eq, Hacc1a_eq. reflexivity. }
 
   (* extract(&acc, &l8[1]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr,
-                r1_c0, r1_c1, r1_c2, Tsh, sh_l).
-  { (* 1: frame - extract l8[1] from the 7-element sub-array *)
+  forward_call (v_acc, acc1,
+                field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr,
+                Tsh, sh_l).
+  { (* frame: extract l8[1] from the 7-element sub-array *)
     rewrite (split2_data_at__Tarray_app 1 7 sh_l tulong
                (field_address0 (tarray tulong 8) (SUB 1) l8_ptr)) by lia.
     rewrite data__at_singleton_array_eq.
     rewrite (arr_field_address0 tulong 8 l8_ptr 1 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 1 Hfc) by lia.
     cancel. }
-  { (* 2: bounds *)
-    repeat split;
-    subst r1_c0 r1_c1 r1_c2;
-    try (unfold muladd_c0; apply mod_u64_range);
-    try (unfold muladd_c1; apply mod_u64_range);
-    try (unfold muladd_c2; apply mod_u64_range). }
 
-  (* After extract, acc = (r1_c1, r1_c2, 0) *)
-  assert (Hacc_r2_init : acc_full r1_c1 r1_c2 0 = r1_c1 + r1_c2 * 2^64).
-  { apply acc_full_shift. }
+  (* Intro extracted limb and shifted accumulator for round 1 *)
+  Intros vret1.
+  rename H into Hr1_eq.
+  rename H0 into Hcarry1_eq.
+  destruct vret1 as [r1 carry1].
+  simpl fst in *. 
+  simpl snd in *.
 
-  (* Bound: acc_full(r1_c1, r1_c2, 0) <= acc_full(r1_c0, r1_c1, r1_c2) < the round 1 total *)
-  assert (Hacc_r2_init_bound : acc_full r1_c1 r1_c2 0 <= r1_c0_in + a0 * b1 + a1 * b0).
-  { rewrite Hacc_r2_init.
-    assert (acc_full r1_c0 r1_c1 r1_c2 = r1_c0_in + a0 * b1 + a1 * b0) by exact Hacc_r1.
-    unfold acc_full in H.
-    assert (0 <= r1_c0) by (subst r1_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    lia. }
+  (* Carry bound: acc_val carry1 <= 2 * 2^64 - 3 *)
+  assert (Hcarry1_ub : acc_val carry1 <= 2 * 2^64 - 3).
+  { rewrite Hcarry1_eq, Hacc1.
+    apply (Z.le_trans _ (((2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
+
+  (* ===== Round 2: l8[2] = a0*b2 + a1*b1 + a2*b0 (3 products) ===== *)
 
   (* a0 = a->d[0], b2 = b->d[2] *)
   forward.
   forward.
 
   (* muladd(&acc, a0, b2) *)
-  forward_call (v_acc, a0, b2,
-                r1_c1, r1_c2, 0, Tsh).
-  { subst r1_c1 r1_c2.
-    repeat split; try solve_muladd_range; try lia. }
+  forward_call (v_acc, carry1, a0, b2, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a0, b2) *)
-  set (r2_c0_0 := muladd_c0 r1_c1 a0 b2) in *.
-  set (r2_c1_0 := muladd_c1 r1_c1 r1_c2 a0 b2) in *.
-  set (r2_c2_0 := muladd_c2 r1_c1 r1_c2 0 a0 b2) in *.
-
-  (* Track acc_full through muladd(a0, b2) *)
-  assert (Hacc_r2_0 : acc_full r2_c0_0 r2_c1_0 r2_c2_0
-    = acc_full r1_c1 r1_c2 0 + a0 * b2).
-  { subst r2_c0_0 r2_c1_0 r2_c2_0.
-    apply acc_full_muladd; try lia.
-    - subst r1_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r1_c2. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc2a.
+  rename H into Hacc2a_eq.
+  deadvars!.
 
   (* a1 = a->d[1], b1 = b->d[1] *)
   forward.
   forward.
 
   (* muladd(&acc, a1, b1) *)
-  forward_call (v_acc, a1, b1,
-                r2_c0_0, r2_c1_0, r2_c2_0, Tsh).
-  { subst r2_c0_0 r2_c1_0 r2_c2_0.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc2a, a1, b1, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a1, b1) *)
-  set (r2_c0_1 := muladd_c0 r2_c0_0 a1 b1) in *.
-  set (r2_c1_1 := muladd_c1 r2_c0_0 r2_c1_0 a1 b1) in *.
-  set (r2_c2_1 := muladd_c2 r2_c0_0 r2_c1_0 r2_c2_0 a1 b1) in *.
-
-  (* Track acc_full through muladd(a1, b1) *)
-  assert (Hacc_r2_1 : acc_full r2_c0_1 r2_c1_1 r2_c2_1
-    = acc_full r2_c0_0 r2_c1_0 r2_c2_0 + a1 * b1).
-  { subst r2_c0_1 r2_c1_1 r2_c2_1.
-    apply acc_full_muladd; try lia.
-    - subst r2_c0_0. unfold muladd_c0. apply mod_u64_range.
-    - subst r2_c1_0. unfold muladd_c1. apply mod_u64_range.
-    - subst r2_c2_0. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc2b.
+  rename H into Hacc2b_eq.
+  deadvars!.
 
   (* a2 = a->d[2], b0 = b->d[0] *)
   forward.
   forward.
 
   (* muladd(&acc, a2, b0) *)
-  forward_call (v_acc, a2, b0,
-                r2_c0_1, r2_c1_1, r2_c2_1, Tsh).
-  { subst r2_c0_1 r2_c1_1 r2_c2_1.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc2b, a2, b0, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a2, b0) *)
-  set (r2_c0 := muladd_c0 r2_c0_1 a2 b0) in *.
-  set (r2_c1 := muladd_c1 r2_c0_1 r2_c1_1 a2 b0) in *.
-  set (r2_c2 := muladd_c2 r2_c0_1 r2_c1_1 r2_c2_1 a2 b0) in *.
-
-  (* Track acc_full through muladd(a2, b0) *)
-  assert (Hacc_r2_2 : acc_full r2_c0 r2_c1 r2_c2
-    = acc_full r2_c0_1 r2_c1_1 r2_c2_1 + a2 * b0).
-  { subst r2_c0 r2_c1 r2_c2.
-    apply acc_full_muladd; try lia.
-    - subst r2_c0_1. unfold muladd_c0. apply mod_u64_range.
-    - subst r2_c1_1. unfold muladd_c1. apply mod_u64_range.
-    - subst r2_c2_1. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc2.
+  rename H into Hacc2_eq.
+  deadvars!.
 
   (* Full chain for round 2 *)
-  assert (Hacc_r2 : acc_full r2_c0 r2_c1 r2_c2
-    = acc_full r1_c1 r1_c2 0 + a0 * b2 + a1 * b1 + a2 * b0).
-  { rewrite Hacc_r2_2, Hacc_r2_1, Hacc_r2_0. lia. }
+  assert (Hacc2 : acc_val acc2 =
+    acc_val carry1 + u64_val a0 * u64_val b2 + u64_val a1 * u64_val b1 + u64_val a2 * u64_val b0).
+  { rewrite Hacc2_eq, Hacc2b_eq, Hacc2a_eq. lia. }
 
   (* extract(&acc, &l8[2]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr,
-                r2_c0, r2_c1, r2_c2, Tsh, sh_l).
+  forward_call (v_acc, acc2,
+                field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr,
+                Tsh, sh_l).
   { (* frame: peel l8[2] out of the 6-element sub-array *)
     (* Step 1: Normalize nested field_address0 to parent coordinates.
        The sub-array rest lives at:
@@ -1351,136 +1285,78 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 2 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 2 Hfc) by lia.
     cancel. }
-  { repeat split;
-    subst r2_c0 r2_c1 r2_c2;
-    try (unfold muladd_c0; apply mod_u64_range);
-    try (unfold muladd_c1; apply mod_u64_range);
-    try (unfold muladd_c2; apply mod_u64_range). }
 
-  (* After extract, acc = (r2_c1, r2_c2, 0) *)
-  assert (Hacc_r3_init : acc_full r2_c1 r2_c2 0 = r2_c1 + r2_c2 * 2^64).
-  { apply acc_full_shift. }
+  (* Intro extracted limb and shifted accumulator for round 2 *)
+  Intros vret2.
+  rename H into Hr2_eq.
+  rename H0 into Hcarry2_eq.
+  destruct vret2 as [r2 carry2].
+  simpl fst in *.
+  simpl snd in *.
 
-  assert (Hacc_r3_init_bound : acc_full r2_c1 r2_c2 0
-    <= acc_full r1_c1 r1_c2 0 + a0 * b2 + a1 * b1 + a2 * b0).
-  { rewrite <- Hacc_r2.
-    unfold acc_full.
-    assert (0 <= r2_c0) by (subst r2_c1; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    assert (0 <= r2_c1) by (subst r2_c1; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    assert (0 <= r2_c2) by (subst r2_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-    rep_lia. }
+  (* Carry bound: acc_val carry2 <= 3 * 2^64 - 4 *)
+  assert (Hcarry2_ub : acc_val carry2 <= 3 * 2^64 - 4).
+  { rewrite Hcarry2_eq, Hacc2.
+    apply (Z.le_trans _ (((2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
+
+  (* ===== Round 3: l8[3] = a0*b3 + a1*b2 + a2*b1 + a3*b0 (4 products) ===== *)
 
   (* a0 = a->d[0], b3 = b->d[3] *)
   forward.
   forward.
 
   (* muladd(&acc, a0, b3) *)
-  forward_call (v_acc, a0, b3,
-                r2_c1, r2_c2, 0, Tsh).
-  { subst r2_c1 r2_c2.
-    repeat split; try solve_muladd_range; try lia. }
+  forward_call (v_acc, carry2, a0, b3, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a0, b3) *)
-  set (r3_c0_0 := muladd_c0 r2_c1 a0 b3) in *.
-  set (r3_c1_0 := muladd_c1 r2_c1 r2_c2 a0 b3) in *.
-  set (r3_c2_0 := muladd_c2 r2_c1 r2_c2 0 a0 b3) in *.
-
-  (* Track acc_full through muladd(a0, b3) *)
-  assert (Hacc_r3_0 : acc_full r3_c0_0 r3_c1_0 r3_c2_0
-    = acc_full r2_c1 r2_c2 0 + a0 * b3).
-  { subst r3_c0_0 r3_c1_0 r3_c2_0.
-    apply acc_full_muladd; try lia.
-    - subst r2_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r2_c2. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc3a.
+  rename H into Hacc3a_eq.
+  deadvars!.
 
   (* a1 = a->d[1], b2 = b->d[2] *)
   forward.
   forward.
 
   (* muladd(&acc, a1, b2) *)
-  forward_call (v_acc, a1, b2,
-                r3_c0_0, r3_c1_0, r3_c2_0, Tsh).
-  { subst r3_c0_0 r3_c1_0 r3_c2_0.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc3a, a1, b2, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a1, b2) *)
-  set (r3_c0_1 := muladd_c0 r3_c0_0 a1 b2) in *.
-  set (r3_c1_1 := muladd_c1 r3_c0_0 r3_c1_0 a1 b2) in *.
-  set (r3_c2_1 := muladd_c2 r3_c0_0 r3_c1_0 r3_c2_0 a1 b2) in *.
-
-  (* Track acc_full through muladd(a1, b2) *)
-  assert (Hacc_r3_1 : acc_full r3_c0_1 r3_c1_1 r3_c2_1
-    = acc_full r3_c0_0 r3_c1_0 r3_c2_0 + a1 * b2).
-  { subst r3_c0_1 r3_c1_1 r3_c2_1.
-    apply acc_full_muladd; try lia.
-    - subst r3_c0_0. unfold muladd_c0. apply mod_u64_range.
-    - subst r3_c1_0. unfold muladd_c1. apply mod_u64_range.
-    - subst r3_c2_0. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc3b.
+  rename H into Hacc3b_eq.
+  deadvars!.
 
   (* a2 = a->d[2], b1 = b->d[1] *)
   forward.
   forward.
 
   (* muladd(&acc, a2, b1) *)
-  forward_call (v_acc, a2, b1,
-                r3_c0_1, r3_c1_1, r3_c2_1, Tsh).
-  { subst r3_c0_1 r3_c1_1 r3_c2_1.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc3b, a2, b1, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a2, b1) *)
-  set (r3_c0_2 := muladd_c0 r3_c0_1 a2 b1) in *.
-  set (r3_c1_2 := muladd_c1 r3_c0_1 r3_c1_1 a2 b1) in *.
-  set (r3_c2_2 := muladd_c2 r3_c0_1 r3_c1_1 r3_c2_1 a2 b1) in *.
-
-  (* Track acc_full through muladd(a2, b1) *)
-  assert (Hacc_r3_2 : acc_full r3_c0_2 r3_c1_2 r3_c2_2
-    = acc_full r3_c0_1 r3_c1_1 r3_c2_1 + a2 * b1).
-  { subst r3_c0_2 r3_c1_2 r3_c2_2.
-    apply acc_full_muladd; try lia.
-    - subst r3_c0_1. unfold muladd_c0. apply mod_u64_range.
-    - subst r3_c1_1. unfold muladd_c1. apply mod_u64_range.
-    - subst r3_c2_1. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc3c.
+  rename H into Hacc3c_eq.
+  deadvars!.
 
   (* a3 = a->d[3], b0 = b->d[0] *)
   forward.
   forward.
 
   (* muladd(&acc, a3, b0) *)
-  forward_call (v_acc, a3, b0,
-                r3_c0_2, r3_c1_2, r3_c2_2, Tsh).
-  { subst r3_c0_2 r3_c1_2 r3_c2_2.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc3c, a3, b0, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a3, b0) *)
-  set (r3_c0 := muladd_c0 r3_c0_2 a3 b0) in *.
-  set (r3_c1 := muladd_c1 r3_c0_2 r3_c1_2 a3 b0) in *.
-  set (r3_c2 := muladd_c2 r3_c0_2 r3_c1_2 r3_c2_2 a3 b0) in *.
-
-  (* Track acc_full through muladd(a3, b0) *)
-  assert (Hacc_r3_3 : acc_full r3_c0 r3_c1 r3_c2
-    = acc_full r3_c0_2 r3_c1_2 r3_c2_2 + a3 * b0).
-  { subst r3_c0 r3_c1 r3_c2.
-    apply acc_full_muladd; try lia.
-    - subst r3_c0_2. unfold muladd_c0. apply mod_u64_range.
-    - subst r3_c1_2. unfold muladd_c1. apply mod_u64_range.
-    - subst r3_c2_2. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc3.
+  rename H into Hacc3_eq.
+  deadvars!.
 
   (* Full chain for round 3 *)
-  assert (Hacc_r3 : acc_full r3_c0 r3_c1 r3_c2
-    = acc_full r2_c1 r2_c2 0 + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0).
-  { rewrite Hacc_r3_3, Hacc_r3_2, Hacc_r3_1, Hacc_r3_0. lia. }
+  assert (Hacc3 : acc_val acc3 =
+    acc_val carry2 + u64_val a0 * u64_val b3 + u64_val a1 * u64_val b2
+    + u64_val a2 * u64_val b1 + u64_val a3 * u64_val b0).
+  { rewrite Hacc3_eq, Hacc3c_eq, Hacc3b_eq, Hacc3a_eq. lia. }
 
   (* extract(&acc, &l8[3]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr,
-                r3_c0, r3_c1, r3_c2, Tsh, sh_l).
+  forward_call (v_acc, acc3,
+                field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr,
+                Tsh, sh_l).
   { (* frame: peel l8[3] out of the 5-element sub-array *)
     change (offset_val 16 l8_ptr)
       with (offset_val (sizeof tulong * 2) l8_ptr).
@@ -1492,112 +1368,67 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 3 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 3 Hfc) by lia.
     cancel. }
-  { repeat split;
-    subst r3_c0 r3_c1 r3_c2;
-    try (unfold muladd_c0; apply mod_u64_range);
-    try (unfold muladd_c1; apply mod_u64_range);
-    try (unfold muladd_c2; apply mod_u64_range). }
 
-  (* After extract, acc = (r3_c1, r3_c2, 0) *)
-  assert (Hacc_r4_init : acc_full r3_c1 r3_c2 0 = r3_c1 + r3_c2 * 2^64).
-  { apply acc_full_shift. }
+  (* Intro extracted limb and shifted accumulator for round 3 *)
+  Intros vret3.
+  rename H into Hr3_eq.
+  rename H0 into Hcarry3_eq.
+  destruct vret3 as [r3 carry3].
+  simpl fst in *.
+  simpl snd in *.
 
-  assert (Hacc_r4_init_bound : acc_full r3_c1 r3_c2 0
-    <= acc_full r2_c1 r2_c2 0 + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0).
-  { rewrite <- Hacc_r3.
-    unfold acc_full.
-    simpl (0 * _).
-    rewrite Z.add_0_r.
-    assert (0 <= r3_c0) by (subst r3_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    assert (0 <= r3_c1) by (subst r3_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-    assert (0 <= r3_c2) by (subst r3_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-    rep_lia. }
+  (* Carry bound: acc_val carry3 <= 4 * 2^64 - 5 *)
+  assert (Hcarry3_ub : acc_val carry3 <= 4 * 2^64 - 5).
+  { rewrite Hcarry3_eq, Hacc3.
+    apply (Z.le_trans _ (((3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
+
+  (* ===== Round 4: l8[4] = a1*b3 + a2*b2 + a3*b1 (3 products) ===== *)
 
   (* a1 = a->d[1], b3 = b->d[3] *)
   forward.
   forward.
 
   (* muladd(&acc, a1, b3) *)
-  forward_call (v_acc, a1, b3,
-                r3_c1, r3_c2, 0, Tsh).
-  { subst r3_c1 r3_c2.
-    repeat split; try solve_muladd_range; try lia. }
+  forward_call (v_acc, carry3, a1, b3, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a1, b3) *)
-  set (r4_c0_0 := muladd_c0 r3_c1 a1 b3) in *.
-  set (r4_c1_0 := muladd_c1 r3_c1 r3_c2 a1 b3) in *.
-  set (r4_c2_0 := muladd_c2 r3_c1 r3_c2 0 a1 b3) in *.
-
-  (* Track acc_full through muladd(a1, b3) *)
-  assert (Hacc_r4_0 : acc_full r4_c0_0 r4_c1_0 r4_c2_0
-    = acc_full r3_c1 r3_c2 0 + a1 * b3).
-  { subst r4_c0_0 r4_c1_0 r4_c2_0.
-    apply acc_full_muladd; try lia.
-    - subst r3_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r3_c2. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc4a.
+  rename H into Hacc4a_eq.
+  deadvars!.
 
   (* a2 = a->d[2], b2 = b->d[2] *)
   forward.
   forward.
 
   (* muladd(&acc, a2, b2) *)
-  forward_call (v_acc, a2, b2,
-                r4_c0_0, r4_c1_0, r4_c2_0, Tsh).
-  { subst r4_c0_0 r4_c1_0 r4_c2_0.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc4a, a2, b2, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a2, b2) *)
-  set (r4_c0_1 := muladd_c0 r4_c0_0 a2 b2) in *.
-  set (r4_c1_1 := muladd_c1 r4_c0_0 r4_c1_0 a2 b2) in *.
-  set (r4_c2_1 := muladd_c2 r4_c0_0 r4_c1_0 r4_c2_0 a2 b2) in *.
-
-  (* Track acc_full through muladd(a2, b2) *)
-  assert (Hacc_r4_1 : acc_full r4_c0_1 r4_c1_1 r4_c2_1
-    = acc_full r4_c0_0 r4_c1_0 r4_c2_0 + a2 * b2).
-  { subst r4_c0_1 r4_c1_1 r4_c2_1.
-    apply acc_full_muladd; try lia.
-    - subst r4_c0_0. unfold muladd_c0. apply mod_u64_range.
-    - subst r4_c1_0. unfold muladd_c1. apply mod_u64_range.
-    - subst r4_c2_0. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc4b.
+  rename H into Hacc4b_eq.
+  deadvars!.
 
   (* a3 = a->d[3], b1 = b->d[1] *)
   forward.
   forward.
 
   (* muladd(&acc, a3, b1) *)
-  forward_call (v_acc, a3, b1,
-                r4_c0_1, r4_c1_1, r4_c2_1, Tsh).
-  { subst r4_c0_1 r4_c1_1 r4_c2_1.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc4b, a3, b1, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a3, b1) *)
-  set (r4_c0 := muladd_c0 r4_c0_1 a3 b1) in *.
-  set (r4_c1 := muladd_c1 r4_c0_1 r4_c1_1 a3 b1) in *.
-  set (r4_c2 := muladd_c2 r4_c0_1 r4_c1_1 r4_c2_1 a3 b1) in *.
-
-  (* Track acc_full through muladd(a3, b1) *)
-  assert (Hacc_r4_2 : acc_full r4_c0 r4_c1 r4_c2
-    = acc_full r4_c0_1 r4_c1_1 r4_c2_1 + a3 * b1).
-  { subst r4_c0 r4_c1 r4_c2.
-    apply acc_full_muladd; try lia.
-    - subst r4_c0_1. unfold muladd_c0. apply mod_u64_range.
-    - subst r4_c1_1. unfold muladd_c1. apply mod_u64_range.
-    - subst r4_c2_1. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc4.
+  rename H into Hacc4_eq.
+  deadvars!.
 
   (* Full chain for round 4 *)
-  assert (Hacc_r4 : acc_full r4_c0 r4_c1 r4_c2
-    = acc_full r3_c1 r3_c2 0 + a1 * b3 + a2 * b2 + a3 * b1).
-  { rewrite Hacc_r4_2, Hacc_r4_1, Hacc_r4_0. lia. }
+  assert (Hacc4 : acc_val acc4 =
+    acc_val carry3 + u64_val a1 * u64_val b3 + u64_val a2 * u64_val b2
+    + u64_val a3 * u64_val b1).
+  { rewrite Hacc4_eq, Hacc4b_eq, Hacc4a_eq. lia. }
 
   (* extract(&acc, &l8[4]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr,
-                r4_c0, r4_c1, r4_c2, Tsh, sh_l).
+  forward_call (v_acc, acc4,
+                field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr,
+                Tsh, sh_l).
   { (* frame: peel l8[4] out of the 4-element sub-array *)
     change (offset_val 24 l8_ptr)
       with (offset_val (sizeof tulong * 3) l8_ptr).
@@ -1609,86 +1440,55 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 4 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 4 Hfc) by lia.
     cancel. }
-  { repeat split;
-    subst r4_c0 r4_c1 r4_c2;
-    try (unfold muladd_c0; apply mod_u64_range);
-    try (unfold muladd_c1; apply mod_u64_range);
-    try (unfold muladd_c2; apply mod_u64_range). }
 
-  (* After extract, acc = (r4_c1, r4_c2, 0) *)
-  assert (Hacc_r5_init : acc_full r4_c1 r4_c2 0 = r4_c1 + r4_c2 * 2^64).
-  { apply acc_full_shift. }
+  (* Intro extracted limb and shifted accumulator for round 4 *)
+  Intros vret4.
+  rename H into Hr4_eq.
+  rename H0 into Hcarry4_eq.
+  destruct vret4 as [r4 carry4].
+  simpl fst in *.
+  simpl snd in *.
 
-  assert (Hacc_r5_init_bound : acc_full r4_c1 r4_c2 0
-    <= acc_full r3_c1 r3_c2 0 + a1 * b3 + a2 * b2 + a3 * b1).
-  { rewrite <- Hacc_r4.
-    unfold acc_full.
-    simpl (0 * _).
-    rewrite Z.add_0_r.
-    assert (0 <= r4_c0) by (subst r4_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    assert (0 <= r4_c1) by (subst r4_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-    assert (0 <= r4_c2) by (subst r4_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-    rep_lia. }
+  (* Carry bound: acc_val carry4 <= 3 * 2^64 - 3 *)
+  assert (Hcarry4_ub : acc_val carry4 <= 3 * 2^64 - 3).
+  { rewrite Hcarry4_eq, Hacc4.
+    apply (Z.le_trans _ (((4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
+
+  (* ===== Round 5: l8[5] = a2*b3 + a3*b2 (2 products) ===== *)
 
   (* a2 = a->d[2], b3 = b->d[3] *)
   forward.
   forward.
 
   (* muladd(&acc, a2, b3) *)
-  forward_call (v_acc, a2, b3,
-                r4_c1, r4_c2, 0, Tsh).
-  { subst r4_c1 r4_c2.
-    repeat split; try solve_muladd_range; try lia. }
+  forward_call (v_acc, carry4, a2, b3, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a2, b3) *)
-  set (r5_c0_0 := muladd_c0 r4_c1 a2 b3) in *.
-  set (r5_c1_0 := muladd_c1 r4_c1 r4_c2 a2 b3) in *.
-  set (r5_c2_0 := muladd_c2 r4_c1 r4_c2 0 a2 b3) in *.
-
-  (* Track acc_full through muladd(a2, b3) *)
-  assert (Hacc_r5_0 : acc_full r5_c0_0 r5_c1_0 r5_c2_0
-    = acc_full r4_c1 r4_c2 0 + a2 * b3).
-  { subst r5_c0_0 r5_c1_0 r5_c2_0.
-    apply acc_full_muladd; try lia.
-    - subst r4_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r4_c2. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc5a.
+  rename H into Hacc5a_eq.
+  deadvars!.
 
   (* a3 = a->d[3], b2 = b->d[2] *)
   forward.
   forward.
 
   (* muladd(&acc, a3, b2) *)
-  forward_call (v_acc, a3, b2,
-                r5_c0_0, r5_c1_0, r5_c2_0, Tsh).
-  { subst r5_c0_0 r5_c1_0 r5_c2_0.
-    repeat split; try solve_muladd_range. }
+  forward_call (v_acc, acc5a, a3, b2, Tsh).
 
-  deadvars!; simpl.
-
-  (* Abbreviate accumulator state after muladd(a3, b2) *)
-  set (r5_c0 := muladd_c0 r5_c0_0 a3 b2) in *.
-  set (r5_c1 := muladd_c1 r5_c0_0 r5_c1_0 a3 b2) in *.
-  set (r5_c2 := muladd_c2 r5_c0_0 r5_c1_0 r5_c2_0 a3 b2) in *.
-
-  (* Track acc_full through muladd(a3, b2) *)
-  assert (Hacc_r5_1 : acc_full r5_c0 r5_c1 r5_c2
-    = acc_full r5_c0_0 r5_c1_0 r5_c2_0 + a3 * b2).
-  { subst r5_c0 r5_c1 r5_c2.
-    apply acc_full_muladd; try lia.
-    - subst r5_c0_0. unfold muladd_c0. apply mod_u64_range.
-    - subst r5_c1_0. unfold muladd_c1. apply mod_u64_range.
-    - subst r5_c2_0. unfold muladd_c2. apply mod_u64_range. }
+  Intros acc5.
+  rename H into Hacc5_eq.
+  deadvars!.
 
   (* Full chain for round 5 *)
-  assert (Hacc_r5 : acc_full r5_c0 r5_c1 r5_c2
-    = acc_full r4_c1 r4_c2 0 + a2 * b3 + a3 * b2).
-  { rewrite Hacc_r5_1, Hacc_r5_0. lia. }
+  assert (Hacc5 : acc_val acc5 =
+    acc_val carry4 + u64_val a2 * u64_val b3 + u64_val a3 * u64_val b2).
+  { rewrite Hacc5_eq, Hacc5a_eq. lia. }
 
   (* extract(&acc, &l8[5]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr,
-                r5_c0, r5_c1, r5_c2, Tsh, sh_l).
+  forward_call (v_acc, acc5,
+                field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr,
+                Tsh, sh_l).
   { (* frame: peel l8[5] out of the 3-element sub-array *)
     change (offset_val 32 l8_ptr)
       with (offset_val (sizeof tulong * 4) l8_ptr).
@@ -1700,236 +1500,43 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 5 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 5 Hfc) by lia.
     cancel. }
-  { repeat split;
-    subst r5_c0 r5_c1 r5_c2;
-    try (unfold muladd_c0; apply mod_u64_range);
-    try (unfold muladd_c1; apply mod_u64_range);
-    try (unfold muladd_c2; apply mod_u64_range). }
 
-  (* After extract, acc = (r5_c1, r5_c2, 0) *)
-  assert (Hacc_r6_init : acc_full r5_c1 r5_c2 0 = r5_c1 + r5_c2 * 2^64).
-  { apply acc_full_shift. }
+  (* Intro extracted limb and shifted accumulator for round 5 *)
+  Intros vret5.
+  rename H into Hr5_eq.
+  rename H0 into Hcarry5_eq.
+  destruct vret5 as [r5 carry5].
+  simpl fst in *.
+  simpl snd in *.
 
-  assert (Hacc_r6_init_bound : acc_full r5_c1 r5_c2 0
-    <= acc_full r4_c1 r4_c2 0 + a2 * b3 + a3 * b2).
-  { rewrite <- Hacc_r5.
-    unfold acc_full.
-    simpl (0 * _).
-    rewrite Z.add_0_r.
-    assert (0 <= r5_c0) by (subst r5_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-    assert (0 <= r5_c1) by (subst r5_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-    assert (0 <= r5_c2) by (subst r5_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-    rep_lia. }
+  (* Carry bound: acc_val carry5 <= 2 * 2^64 - 2 *)
+  assert (Hcarry5_ub : acc_val carry5 <= 2 * 2^64 - 2).
+  { rewrite Hcarry5_eq, Hacc5.
+    apply (Z.le_trans _ (((3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
+    - apply Z.div_le_mono; lia.
+    - reflexivity. }
+
+  (* ===== Round 6: l8[6],l8[7] = a3*b3 (1 product, uses muladd_fast + extract_fast + store) ===== *)
 
   (* a3 = a->d[3], b3 = b->d[3] *)
   forward.
   forward.
 
-  (* The accumulator + a3*b3 fits in 128 bits -- needed for muladd_fast *)
-  assert (Hr6_bound : r5_c1 + r5_c2 * 2^64 + a3 * b3 < 2^128).
-  { (* Strategy: bound each carry tightly using carry_k * 2^64 <= total_k,
-       which follows from acc_full c0 c1 c2 = total and c0 >= 0.
-       Then derive concrete integer upper bounds on each carry, step by step.
-       Let B = 2^64, M = B-1.  Each ai*bj <= M*M = B^2 - 2B + 1.
+  (* muladd_fast(&acc, a3, b3) — precondition: acc + a3*b3 < 2^128 *)
+  forward_call (v_acc, carry5, a3, b3, Tsh).
 
-       Round 0 (1 product):  c0 * B <= a0*b0 <= M^2
-                              => c0 <= (M^2) / B = B - 2
-       Round 1 (2 products): c1 * B <= c0 + 2*M^2 <= (B-2) + 2*M^2 = 2B^2 - 3B
-                              => c1 <= 2B - 3
-       Round 2 (3 products): c2 * B <= c1 + 3*M^2 <= (2B-3) + 3*M^2 = 3B^2 - 4B - 2 + B
-                              Careful: (2B-3) + 3*(B^2-2B+1) = 3B^2 - 4B
-                              => c2 <= 3B - 4
-       Round 3 (4 products): c3 * B <= c2 + 4*M^2 <= (3B-4) + 4*(B^2-2B+1) = 4B^2 - 5B
-                              => c3 <= 4B - 5
-       Round 4 (3 products): c4 * B <= c3 + 3*M^2 <= (4B-5) + 3*(B^2-2B+1) = 3B^2 - 2B - 2
-                              => c4 <= (3B^2 - 2B - 2) / B = 3B - 3  (since 2B+2 > B)
-       Round 5 (2 products): c5 * B <= c4 + 2*M^2 <= (3B-3) + 2*(B^2-2B+1) = 2B^2 - B - 1
-                              => c5 <= (2B^2 - B - 1) / B = 2B - 2  (since B+1 > B)
-       Finally: c5 + M^2 <= (2B-2) + (B^2-2B+1) = B^2 - 1 < B^2 = 2^128.  *)
-
-    (* --- Step 0: r1_c0_in * B <= a0*b0 --- *)
-    assert (Htight0 : r1_c0_in * 2^64 <= a0 * b0).
-    { pose proof Hacc_r0 as H0'. unfold acc_full in H0'. simpl (0 * _) in H0'.
-      assert (0 <= muladd_c0 0 a0 b0)
-        by (unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc0_ub : r1_c0_in <= 2^64 - 2).
-    { assert (Hrhs0 : a0 * b0 <= (2^64 - 1) * (2^64 - 1))
-        by (apply Z.mul_le_mono_nonneg; rep_lia).
-      nia. }
-
-    (* --- Step 1: (r1_c1 + r1_c2 * B) * B <= r1_c0_in + a0*b1 + a1*b0 --- *)
-    assert (Htight1 : (r1_c1 + r1_c2 * 2^64) * 2^64
-                      <= r1_c0_in + a0 * b1 + a1 * b0).
-    { pose proof Hacc_r1 as H1'. unfold acc_full in H1'.
-      assert (0 <= r1_c0)
-        by (subst r1_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc1_ub : r1_c1 + r1_c2 * 2^64 <= 2 * 2^64 - 3).
-    { assert (Hrhs1 : r1_c0_in + a0 * b1 + a1 * b0
-                      <= (2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1))).
-      { assert (a0 * b1 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a1 * b0 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        lia. }
-      assert (0 <= r1_c1 + r1_c2 * 2^64).
-      { assert (0 <= r1_c1)
-          by (subst r1_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-        assert (0 <= r1_c2)
-          by (subst r1_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-        lia. }
-      nia. }
-
-    (* --- Step 2: (r2_c1 + r2_c2 * B) * B <= c1 + a0*b2 + a1*b1 + a2*b0 --- *)
-    assert (Htight2 : (r2_c1 + r2_c2 * 2^64) * 2^64
-                      <= (r1_c1 + r1_c2 * 2^64) + a0 * b2 + a1 * b1 + a2 * b0).
-    { pose proof Hacc_r2 as H2'. rewrite Hacc_r2_init in H2'.
-      unfold acc_full in H2'.
-      assert (0 <= r2_c0)
-        by (subst r2_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc2_ub : r2_c1 + r2_c2 * 2^64 <= 3 * 2^64 - 4).
-    { assert (Hrhs2 : (r1_c1 + r1_c2 * 2^64) + a0 * b2 + a1 * b1 + a2 * b0
-                      <= (2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1))).
-      { assert (a0 * b2 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a1 * b1 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a2 * b0 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        lia. }
-      assert (0 <= r2_c1 + r2_c2 * 2^64).
-      { assert (0 <= r2_c1)
-          by (subst r2_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-        assert (0 <= r2_c2)
-          by (subst r2_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-        lia. }
-      nia. }
-
-    (* --- Step 3: (r3_c1 + r3_c2 * B) * B <= c2 + a0*b3 + a1*b2 + a2*b1 + a3*b0 --- *)
-    assert (Htight3 : (r3_c1 + r3_c2 * 2^64) * 2^64
-                      <= (r2_c1 + r2_c2 * 2^64)
-                         + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0).
-    { pose proof Hacc_r3 as H3'. rewrite Hacc_r3_init in H3'.
-      unfold acc_full in H3'.
-      assert (0 <= r3_c0)
-        by (subst r3_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc3_ub : r3_c1 + r3_c2 * 2^64 <= 4 * 2^64 - 5).
-    { (* First bound the RHS of Htight3 concretely, then divide *)
-      assert (Hrhs3 : (r2_c1 + r2_c2 * 2^64)
-                      + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0
-                      <= (3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1))).
-      { assert (a0 * b3 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a1 * b2 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a2 * b1 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a3 * b0 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        lia. }
-      assert (0 <= r3_c1 + r3_c2 * 2^64).
-      { assert (0 <= r3_c1)
-          by (subst r3_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-        assert (0 <= r3_c2)
-          by (subst r3_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-        lia. }
-      (* Now: c3 * B <= RHS <= concrete.  concrete / B = 4B-5. *)
-      nia. }
-
-    (* --- Step 4: (r4_c1 + r4_c2 * B) * B <= c3 + a1*b3 + a2*b2 + a3*b1 --- *)
-    assert (Htight4 : (r4_c1 + r4_c2 * 2^64) * 2^64
-                      <= (r3_c1 + r3_c2 * 2^64) + a1 * b3 + a2 * b2 + a3 * b1).
-    { pose proof Hacc_r4 as H4'. rewrite Hacc_r4_init in H4'.
-      unfold acc_full in H4'.
-      assert (0 <= r4_c0)
-        by (subst r4_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc4_ub : r4_c1 + r4_c2 * 2^64 <= 3 * 2^64 - 3).
-    { assert (Hrhs4 : (r3_c1 + r3_c2 * 2^64) + a1 * b3 + a2 * b2 + a3 * b1
-                      <= (4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1))).
-      { assert (a1 * b3 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a2 * b2 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a3 * b1 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        lia. }
-      assert (0 <= r4_c1 + r4_c2 * 2^64).
-      { assert (0 <= r4_c1)
-          by (subst r4_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-        assert (0 <= r4_c2)
-          by (subst r4_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-        lia. }
-      nia. }
-
-    (* --- Step 5: (r5_c1 + r5_c2 * B) * B <= c4 + a2*b3 + a3*b2 --- *)
-    assert (Htight5 : (r5_c1 + r5_c2 * 2^64) * 2^64
-                      <= (r4_c1 + r4_c2 * 2^64) + a2 * b3 + a3 * b2).
-    { pose proof Hacc_r5 as H5'. rewrite Hacc_r5_init in H5'.
-      unfold acc_full in H5'.
-      assert (0 <= r5_c0)
-        by (subst r5_c0; unfold muladd_c0; apply Z.mod_pos_bound; lia).
-      lia. }
-    assert (Hc5_ub : r5_c1 + r5_c2 * 2^64 <= 2 * 2^64 - 2).
-    { assert (Hrhs5 : (r4_c1 + r4_c2 * 2^64) + a2 * b3 + a3 * b2
-                      <= (3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1))).
-      { assert (a2 * b3 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        assert (a3 * b2 <= (2^64 - 1) * (2^64 - 1))
-          by (apply Z.mul_le_mono_nonneg; rep_lia).
-        lia. }
-      assert (Hc5_nn : 0 <= r5_c1 + r5_c2 * 2^64).
-      { assert (0 <= r5_c1)
-          by (subst r5_c1; unfold muladd_c1; apply Z.mod_pos_bound; lia).
-        assert (0 <= r5_c2)
-          by (subst r5_c2; unfold muladd_c2; apply Z.mod_pos_bound; lia).
-        lia. }
-      (* Clear irrelevant hypotheses so nia terminates *)
-      clear - Htight5 Hrhs5 Hc5_nn.
-      (* Replace 2^64 with a concrete number for nia *)
-      change (2^64) with 18446744073709551616 in *.
-      nia. }
-
-    (* --- Final: c5 + a3*b3 <= (2B-2) + (B-1)^2 = B^2 - 1 < B^2 = 2^128 --- *)
-    assert (Hprod33 : a3 * b3 <= (2^64 - 1) * (2^64 - 1))
-      by (apply Z.mul_le_mono_nonneg; rep_lia).
-    set (B := 2^64) in *.
-    assert (HB128 : 2^128 = B * B).
-    { unfold B. lia. }
-    assert ((B - 1) * (B - 1) = B*B - 2*B + 1) by nia.
-    lia.
-  }
-
-  (* muladd_fast(&acc, a3, b3) *)
-  forward_call (v_acc, a3, b3, r5_c1, r5_c2, 0, Tsh).
-  { repeat split; try lia.
-    - subst r5_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_u64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_u64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_u64_range. }
-
-  (* Track acc_full through round 6 *)
-  assert (Hacc_r6_0 : acc_full (muladd_c0 r5_c1 a3 b3) (muladd_c1 r5_c1 r5_c2 a3 b3) 0
-    = acc_full r5_c1 r5_c2 0 + a3 * b3).
-  { rewrite (acc_full_muladd_fast r5_c1 r5_c2 0 a3 b3); try lia.
-    - subst r5_c1. unfold muladd_c1. apply mod_u64_range.
-    - subst r5_c2. unfold muladd_c2. apply mod_u64_range. }
-
-  (* Abbreviate accumulator state after muladd_fast(a3, b3) *)
-  set (r6_c0 := muladd_c0 r5_c1 a3 b3) in *.
-  set (r6_c1 := muladd_c1 r5_c1 r5_c2 a3 b3) in *.
+  Intros acc6.
+  rename H into Hacc6_eq.
+  deadvars!.
 
   (* Full chain for round 6 *)
-  assert (Hacc_r6 : acc_full r6_c0 r6_c1 0
-    = acc_full r5_c1 r5_c2 0 + a3 * b3).
-  { exact Hacc_r6_0. }
+  assert (Hacc6 : acc_val acc6 = acc_val carry5 + u64_val a3 * u64_val b3).
+  { exact Hacc6_eq. }
 
-  (* extract_fast(&acc, &l8[6]) *)
-  forward_call (v_acc, field_address (tarray tulong 8) [ArraySubsc 6] l8_ptr,
-                r6_c0, r6_c1, 0, Tsh, sh_l).
+  (* extract_fast(&acc, &l8[6]) — precondition: acc < 2^128 *)
+  forward_call (v_acc, acc6,
+                field_address (tarray tulong 8) [ArraySubsc 6] l8_ptr,
+                Tsh, sh_l).
   { (* frame: peel l8[6] out of the 2-element sub-array *)
     change (offset_val 40 l8_ptr)
       with (offset_val (sizeof tulong * 5) l8_ptr).
@@ -1941,63 +1548,154 @@ Proof.
     rewrite (arr_field_address0 tulong 8 l8_ptr 6 Hfc) by lia.
     rewrite (arr_field_address tulong 8 l8_ptr 6 Hfc) by lia.
     cancel. }
-  { split; [subst r6_c0; unfold muladd_c0; apply mod_u64_range
-           | subst r6_c1; unfold muladd_c1; apply mod_u64_range]. }
 
-  deadvars!.
+  (* Intro extracted limb and shifted accumulator for round 6 *)
+  Intros vret6.
+  rename H into Hr6_eq.
+  rename H0 into Hcarry6_eq.
+  destruct vret6 as [r6 carry6].
+  simpl fst in *.
+  simpl snd in *.
 
-  (* After extract_fast, acc = (r6_c1, 0, 0) *)
   (* l8[7] = acc.c0: first read acc.c0 into temp *)
   forward.
-  (* Now store to l8[7]. The remaining sub-array for l8[7] needs to be
-     rewritten to a form that forward can match. *)
+  (* Now store to l8[7] *)
   change (2 - 1) with 1.
-  change (offset_val (sizeof tulong * 6) l8_ptr)
-    with (offset_val (sizeof tulong * 6) l8_ptr).
   rewrite <- (arr_field_address0 tulong 8 l8_ptr 6 Hfc) by lia.
   rewrite (field_address0_SUB_SUB tulong 2 8 1 6 l8_ptr) by lia.
   change (1 + 6) with 7.
   rewrite data__at_singleton_array_eq.
   rewrite (arr_field_address0 tulong 8 l8_ptr 7 Hfc) by lia.
   rewrite <- (arr_field_address tulong 8 l8_ptr 7 Hfc) by lia.
-  (* Convert data_at_ sh_l tulong (field_address ...) into
-     field_at_ sh_l (tarray tulong 8) [ArraySubsc 7] l8_ptr
-     so that forward can match the store target. *)
   change tulong with (nested_field_type (tarray tulong 8) (SUB 7)).
   rewrite <- field_at__data_at_.
   forward. (* l8[7] = acc.c0 *)
 
+  (* ===== Cleanup: reassemble l8[0..7] array and strip VST machinery ===== *)
 
+  (* Provide the existential witness *)
+  Exists (mul_256 a b).
   entailer!.
 
-  (* --- Postcondition: reassemble l8[0..7] into data_at (tarray tulong 8) --- *)
-  (* Convert field_at for l8[7] into data_at at field_address *)
+  (* Normalize types: nested_field_type (tarray tulong 8) (SUB 7) = tulong *)
+  change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong in *.
+  change (tarray tulong 8) with (tarray tulong 8) in *.
+
+  (* Convert field_at for l8[7] into data_at *)
   rewrite (field_at_data_at sh_l (tarray tulong 8) (SUB 7)) by reflexivity.
   change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong.
 
+  (* Normalize l8[7] value to uint64_to_val form *)
+  change (Vlong (Int64.repr (limb64 (acc_val carry6) 0)))
+    with (uint64_to_val (acc_lo carry6)).
+
   (* Fold the 8 individual data_at into a single array data_at *)
   sep_apply (fold_data_at_tulong_8 sh_l l8_ptr
-    (Vlong (Int64.repr r0_c0))
-    (Vlong (Int64.repr r1_c0))
-    (Vlong (Int64.repr r2_c0))
-    (Vlong (Int64.repr r3_c0))
-    (Vlong (Int64.repr r4_c0))
-    (Vlong (Int64.repr r5_c0))
-    (Vlong (Int64.repr r6_c0))
-    (Vlong (Int64.repr r6_c1))
+    (uint64_to_val (acc_lo acc0))
+    (uint64_to_val (acc_lo acc1))
+    (uint64_to_val (acc_lo acc2))
+    (uint64_to_val (acc_lo acc3))
+    (uint64_to_val (acc_lo acc4))
+    (uint64_to_val (acc_lo acc5))
+    (uint64_to_val (acc_lo acc6))
+    (uint64_to_val (acc_lo carry6))
     Hfc).
 
-  (* Now: data_at sh_l ... [Vlong ...; ...] l8_ptr |-- data_at sh_l ... (mul_512_result ...) l8_ptr *)
-  (* Reduce to proving the two lists are equal *)
+  (* Reduce to list equality *)
   apply derives_refl'.
   f_equal.
 
-  unfold mul_512_result.
-  simpl (seq 0 8). simpl map.
-  repeat (f_equal; [f_equal; f_equal |]); f_equal; f_equal; f_equal.
+  (* Remove all VST/pointer/bounds context — keep only pure Z facts *)
+  clear - a b
+    acc0 Hacc0
+    carry0 Hcarry0_eq
+    acc1 Hacc1
+    carry1 Hcarry1_eq
+    acc2 Hacc2
+    carry2 Hcarry2_eq
+    acc3 Hacc3
+    carry3 Hcarry3_eq
+    acc4 Hacc4
+    carry4 Hcarry4_eq
+    acc5 Hacc5
+    carry5 Hcarry5_eq
+    acc6 Hacc6
+    carry6 Hcarry6_eq.
 
-  (* Clean context: keep only Z-level hypotheses *)
-  clear - a0 a1 a2 a3 b0 b1 b2 b3
-          r0_c0 r1_c0 r2_c0 r3_c0 r4_c0 r5_c0 r6_c0 r6_c1.
+  (* Strip Vlong/Int64.repr wrappers *)
+  unfold uint512_to_val, uint64_to_val.
+  change (map (fun z => Vlong (Int64.repr z))
+    [u64_val (acc_lo acc0); u64_val (acc_lo acc1);
+     u64_val (acc_lo acc2); u64_val (acc_lo acc3);
+     u64_val (acc_lo acc4); u64_val (acc_lo acc5);
+     u64_val (acc_lo acc6); u64_val (acc_lo carry6)] =
+   map (fun z => Vlong (Int64.repr z))
+    [limb64 (u512_val (mul_256 a b)) 0; limb64 (u512_val (mul_256 a b)) 1;
+     limb64 (u512_val (mul_256 a b)) 2; limb64 (u512_val (mul_256 a b)) 3;
+     limb64 (u512_val (mul_256 a b)) 4; limb64 (u512_val (mul_256 a b)) 5;
+     limb64 (u512_val (mul_256 a b)) 6; limb64 (u512_val (mul_256 a b)) 7]).
+  f_equal.
 
-Admitted.
+  (* Unfold record wrappers to pure Z mod/div *)
+  unfold acc_lo; simpl u64_val.
+  unfold limb64.
+  simpl Z.of_nat.
+  rewrite !Z.mul_0_r, !Z.pow_0_r, !Z.div_1_r.
+
+  (* ===== Postcondition: prove mul_256 correctness via schoolbook lemma ===== *)
+
+  (* Apply the general schoolbook multiplication lemma *)
+  set (B := 2^64).
+  pose proof (schoolbook_mul_4x4 B ltac:(unfold B; lia)
+    (u64_val a0) (u64_val a1) (u64_val a2) (u64_val a3)
+    (u64_val b0) (u64_val b1) (u64_val b2) (u64_val b3)
+    ltac:(pose proof (u64_range a0); lia)
+    ltac:(pose proof (u64_range a1); lia)
+    ltac:(pose proof (u64_range a2); lia)
+    ltac:(pose proof (u64_range a3); lia)
+    ltac:(pose proof (u64_range b0); lia)
+    ltac:(pose proof (u64_range b1); lia)
+    ltac:(pose proof (u64_range b2); lia)
+    ltac:(pose proof (u64_range b3); lia)
+    (acc_val acc0) Hacc0
+    (acc_val carry0) Hcarry0_eq
+    (acc_val acc1) Hacc1
+    (acc_val carry1) Hcarry1_eq
+    (acc_val acc2) Hacc2
+    (acc_val carry2) Hcarry2_eq
+    (acc_val acc3) Hacc3
+    (acc_val carry3) Hcarry3_eq
+    (acc_val acc4) Hacc4
+    (acc_val carry4) Hcarry4_eq
+    (acc_val acc5) Hacc5
+    (acc_val carry5) Hcarry5_eq
+    (acc_val acc6) Hacc6
+    (acc_val carry6) Hcarry6_eq
+  ) as Hschoolbook.
+
+  (* The schoolbook lemma talks about eval4, connect to u256_val *)
+  (* u64_val (u256_limb x k) = limb64 (u256_val x) k = limb (2^64) (u256_val x) k *)
+  assert (Heval_a : eval4 B (u64_val a0) (u64_val a1) (u64_val a2) (u64_val a3) = u256_val a).
+  { subst a0 a1 a2 a3. unfold u256_limb; simpl u64_val.
+    change (limb64 (u256_val a) 0) with (limb B (u256_val a) 0).
+    change (limb64 (u256_val a) 1) with (limb B (u256_val a) 1).
+    change (limb64 (u256_val a) 2) with (limb B (u256_val a) 2).
+    change (limb64 (u256_val a) 3) with (limb B (u256_val a) 3).
+    apply eval4_limbs; [unfold B; lia | pose proof (u256_range a); unfold B; lia]. }
+  assert (Heval_b : eval4 B (u64_val b0) (u64_val b1) (u64_val b2) (u64_val b3) = u256_val b).
+  { subst b0 b1 b2 b3. unfold u256_limb; simpl u64_val.
+    change (limb64 (u256_val b) 0) with (limb B (u256_val b) 0).
+    change (limb64 (u256_val b) 1) with (limb B (u256_val b) 1).
+    change (limb64 (u256_val b) 2) with (limb B (u256_val b) 2).
+    change (limb64 (u256_val b) 3) with (limb B (u256_val b) 3).
+    apply eval4_limbs; [unfold B; lia | pose proof (u256_range b); unfold B; lia]. }
+
+  rewrite Heval_a, Heval_b in Hschoolbook.
+  unfold mul_256; simpl u512_val.
+  destruct Hschoolbook as [H0 [H1 [H2 [H3 [H4 [H5 [H6 H7]]]]]]].
+  subst B.
+  f_equal; [exact H0 | f_equal; [exact H1 | f_equal; [exact H2 |
+    f_equal; [exact H3 | f_equal; [exact H4 | f_equal; [exact H5 |
+      f_equal; [exact H6 | f_equal; exact H7]]]]]]].
+
+Qed.

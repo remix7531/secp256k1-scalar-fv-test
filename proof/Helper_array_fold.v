@@ -1,4 +1,4 @@
-(** * Array_fold_lemmas: Fold individual [data_at] entries into array [data_at]
+(** * Helper_array_fold: Fold individual [data_at] entries into array [data_at]
     
     When VST's [forward] processes stores into array slots one at a time,
     the proof state ends up with N separate [data_at sh tulong vi (field_address ...)]

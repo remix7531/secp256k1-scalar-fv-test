@@ -72,6 +72,53 @@ Proof.
   rewrite H2 in H1; rewrite H1 in H0. lia.
 Qed.
 
+(** The [limb] extraction is a left inverse of [eval4]: given 4 digits
+    already in [[0, B)), extracting the digits of their evaluation
+    returns the original digits. *)
+Lemma limbs_eval4 : forall B a0 a1 a2 a3,
+  B > 1 ->
+  0 <= a0 < B -> 0 <= a1 < B -> 0 <= a2 < B -> 0 <= a3 < B ->
+  limb B (eval4 B a0 a1 a2 a3) 0 = a0 /\
+  limb B (eval4 B a0 a1 a2 a3) 1 = a1 /\
+  limb B (eval4 B a0 a1 a2 a3) 2 = a2 /\
+  limb B (eval4 B a0 a1 a2 a3) 3 = a3.
+Proof.
+  intros B a0 a1 a2 a3 HB H0 H1 H2 H3.
+  unfold eval4, limb.
+  simpl (Z.of_nat _).
+  repeat split.
+  - (* conjunct 0: (sum / B^0) mod B = a0 *)
+    rewrite Z.pow_0_r, Z.div_1_r.
+    replace (a0 + a1 * B + a2 * B ^ 2 + a3 * B ^ 3)
+      with (a0 + (a1 + a2 * B + a3 * B ^ 2) * B) by ring.
+    rewrite Z_mod_plus_full.
+    apply Zmod_small; lia.
+  - (* conjunct 1: (sum / B^1) mod B = a1 *)
+    rewrite Z.pow_1_r.
+    replace (a0 + a1 * B + a2 * B ^ 2 + a3 * B ^ 3)
+      with ((a1 + (a2 + a3 * B) * B) * B + a0) by ring.
+    replace (((a1 + (a2 + a3 * B) * B) * B + a0) / B)
+      with (a1 + (a2 + a3 * B) * B) by
+      (apply Z.div_unique with (r := a0); lia).
+    rewrite Z_mod_plus_full.
+    apply Zmod_small; lia.
+  - (* conjunct 2: (sum / B^2) mod B = a2 *)
+    replace (a0 + a1 * B + a2 * B ^ 2 + a3 * B ^ 3)
+      with ((a2 + a3 * B) * B ^ 2 + (a0 + a1 * B)) by ring.
+    replace (((a2 + a3 * B) * B ^ 2 + (a0 + a1 * B)) / B ^ 2)
+      with (a2 + a3 * B) by
+      (apply Z.div_unique with (r := a0 + a1 * B); nia).
+    rewrite Z_mod_plus_full.
+    apply Zmod_small; lia.
+  - (* conjunct 3: (sum / B^3) mod B = a3 *)
+    replace (a0 + a1 * B + a2 * B ^ 2 + a3 * B ^ 3)
+      with (a3 * B ^ 3 + (a0 + a1 * B + a2 * B ^ 2)) by ring.
+    replace ((a3 * B ^ 3 + (a0 + a1 * B + a2 * B ^ 2)) / B ^ 3)
+      with a3 by
+      (apply Z.div_unique with (r := a0 + a1 * B + a2 * B ^ 2); nia).
+    apply Zmod_small; lia.
+Qed.
+
 (** A value in [[0, B^8)] equals its 8-limb little-endian reconstruction.
 
     Same strategy as [eval4_limbs] with 7 quotients. *)
@@ -126,6 +173,46 @@ Proof.
   lia.
 Qed.
 
+(*
+(** The [limb] extraction is a left inverse of [eval8]: given 8 digits
+    already in [[0, B)), extracting the digits of their evaluation
+    returns the original digits. *)
+Lemma limbs_eval8 : forall B r0 r1 r2 r3 r4 r5 r6 r7,
+  B > 1 ->
+  0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B -> 0 <= r3 < B ->
+  0 <= r4 < B -> 0 <= r5 < B -> 0 <= r6 < B -> 0 <= r7 < B ->
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 0 = r0 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 1 = r1 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 2 = r2 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 3 = r3 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 4 = r4 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 5 = r5 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 6 = r6 /\
+  limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 7 = r7.
+Proof.
+Admitted.
+*)
+
+(* ================================================================== *)
+(** ** Congruence lemmas *)
+(* ================================================================== *)
+
+Lemma eval4_congr : forall B a0 a1 a2 a3 b0 b1 b2 b3,
+  a0 = b0 -> a1 = b1 -> a2 = b2 -> a3 = b3 ->
+  eval4 B a0 a1 a2 a3 = eval4 B b0 b1 b2 b3.
+Proof.
+  intros. subst. reflexivity.
+Qed.
+
+Lemma eval8_congr : forall B r0 r1 r2 r3 r4 r5 r6 r7
+                              s0 s1 s2 s3 s4 s5 s6 s7,
+  r0 = s0 -> r1 = s1 -> r2 = s2 -> r3 = s3 ->
+  r4 = s4 -> r5 = s5 -> r6 = s6 -> r7 = s7 ->
+  eval8 B r0 r1 r2 r3 r4 r5 r6 r7 = eval8 B s0 s1 s2 s3 s4 s5 s6 s7.
+Proof.
+  intros. subst. reflexivity.
+Qed.
+
 (* ================================================================== *)
 (** ** Auxiliary lemmas *)
 (* ================================================================== *)
@@ -164,12 +251,134 @@ Proof.
   apply Z.mul_cancel_r in Hbd; lia.
 Qed.
 
+(** If seven limbs of an 8-limb number are known to lie in [[0, B)) and
+    the value lies in [[0, B^8)), then the eighth (most significant) limb
+    also lies in [[0, B)).
+
+    This is the key bound used to promote [carry6] from [0 <= carry6]
+    (which follows from non-negativity of the accumulators) to
+    [carry6 < B] in [schoolbook_mul_4x4]. *)
+Lemma eval8_last_limb_bound : forall B r0 r1 r2 r3 r4 r5 r6 r7,
+  B > 1 ->
+  0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B -> 0 <= r3 < B ->
+  0 <= r4 < B -> 0 <= r5 < B -> 0 <= r6 < B ->
+  0 <= r7 ->
+  eval8 B r0 r1 r2 r3 r4 r5 r6 r7 < B ^ 8 ->
+  r7 < B.
+Proof.
+  intros B r0 r1 r2 r3 r4 r5 r6 r7 HB
+         Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hr7 Hlt.
+  unfold eval8 in Hlt.
+  assert (0 < B ^ 7) by (apply Z.pow_pos_nonneg; lia).
+  assert (r7 * B ^ 7 < B ^ 8) by nia.
+  replace (B ^ 8) with (B * B ^ 7) in * by ring.
+  apply Z.mul_lt_mono_pos_r with (p := B ^ 7); lia.
+Qed.
+
+(* ================================================================== *)
+(** ** Injectivity lemmas *)
+(* ================================================================== *)
+
+(** [eval4] is injective on digits in [[0, B)): if two 4-limb
+    representations evaluate to the same integer, their digits
+    are equal pairwise. *)
+Lemma eval4_injective : forall B a0 a1 a2 a3 b0 b1 b2 b3,
+  B > 1 ->
+  0 <= a0 < B -> 0 <= a1 < B -> 0 <= a2 < B -> 0 <= a3 < B ->
+  0 <= b0 < B -> 0 <= b1 < B -> 0 <= b2 < B -> 0 <= b3 < B ->
+  eval4 B a0 a1 a2 a3 = eval4 B b0 b1 b2 b3 ->
+  a0 = b0 /\ a1 = b1 /\ a2 = b2 /\ a3 = b3.
+Proof.
+  intros B a0 a1 a2 a3 b0 b1 b2 b3 HB
+         Ha0 Ha1 Ha2 Ha3 Hb0 Hb1 Hb2 Hb3 H8.
+  unfold eval4 in H8.
+  (* Digit 0: regroup both sides as [a0 + (rest_a) * B] so that
+     [base_rep_unique_step] can peel off the least-significant digit. *)
+  replace (a0 + a1 * B + a2 * B ^ 2 + a3 * B ^ 3)
+    with (a0 + (a1 + a2 * B + a3 * B ^ 2) * B) in H8 by ring.
+  replace (b0 + b1 * B + b2 * B ^ 2 + b3 * B ^ 3)
+    with (b0 + (b1 + b2 * B + b3 * B ^ 2) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E0 H8]; [| lia| lia | lia].
+  (* Digit 1: same regrouping on the remaining equality. *)
+  replace (a1 + a2 * B + a3 * B ^ 2)
+    with (a1 + (a2 + a3 * B) * B) in H8 by ring.
+  replace (b1 + b2 * B + b3 * B ^ 2)
+    with (b1 + (b2 + b3 * B) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E1 H8]; [| lia| lia | lia].
+  (* Digits 2 and 3: already in [a2 + a3*B] form; one more peel gives both. *)
+  apply base_rep_unique_step in H8 as [E2 E3]; [| lia| lia | lia].
+  exact (conj E0 (conj E1 (conj E2 E3))).
+Qed.
+
+(** [eval8] is injective on digits in [[0, B)): if two 8-limb
+    representations evaluate to the same integer, their digits
+    are equal pairwise. *)
+Lemma eval8_injective : forall B r0 r1 r2 r3 r4 r5 r6 r7
+                                  s0 s1 s2 s3 s4 s5 s6 s7,
+  B > 1 ->
+  0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B -> 0 <= r3 < B ->
+  0 <= r4 < B -> 0 <= r5 < B -> 0 <= r6 < B -> 0 <= r7 < B ->
+  0 <= s0 < B -> 0 <= s1 < B -> 0 <= s2 < B -> 0 <= s3 < B ->
+  0 <= s4 < B -> 0 <= s5 < B -> 0 <= s6 < B -> 0 <= s7 < B ->
+  eval8 B r0 r1 r2 r3 r4 r5 r6 r7 = eval8 B s0 s1 s2 s3 s4 s5 s6 s7 ->
+  r0 = s0 /\ r1 = s1 /\ r2 = s2 /\ r3 = s3 /\
+  r4 = s4 /\ r5 = s5 /\ r6 = s6 /\ r7 = s7.
+Proof.
+  intros B r0 r1 r2 r3 r4 r5 r6 r7
+         s0 s1 s2 s3 s4 s5 s6 s7 HB
+         Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hr7
+         Hs0 Hs1 Hs2 Hs3 Hs4 Hs5 Hs6 Hs7 H8.
+  unfold eval8 in H8.
+  (* Digit 0: regroup both sides as [r0 + (rest_r) * B] and peel. *)
+  replace (r0 + r1*B + r2*B^2 + r3*B^3 + r4*B^4 + r5*B^5 + r6*B^6 + r7*B^7)
+    with (r0 + (r1 + r2*B + r3*B^2 + r4*B^3 + r5*B^4 + r6*B^5 + r7*B^6) * B) in H8 by ring.
+  replace (s0 + s1*B + s2*B^2 + s3*B^3 + s4*B^4 + s5*B^5 + s6*B^6 + s7*B^7)
+    with (s0 + (s1 + s2*B + s3*B^2 + s4*B^3 + s5*B^4 + s6*B^5 + s7*B^6) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E0 H8]; [| lia | lia | lia].
+  (* Digit 1: regroup and peel. *)
+  replace (r1 + r2*B + r3*B^2 + r4*B^3 + r5*B^4 + r6*B^5 + r7*B^6)
+    with (r1 + (r2 + r3*B + r4*B^2 + r5*B^3 + r6*B^4 + r7*B^5) * B) in H8 by ring.
+  replace (s1 + s2*B + s3*B^2 + s4*B^3 + s5*B^4 + s6*B^5 + s7*B^6)
+    with (s1 + (s2 + s3*B + s4*B^2 + s5*B^3 + s6*B^4 + s7*B^5) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E1 H8]; [| lia | lia | lia].
+  (* Digit 2: regroup and peel. *)
+  replace (r2 + r3*B + r4*B^2 + r5*B^3 + r6*B^4 + r7*B^5)
+    with (r2 + (r3 + r4*B + r5*B^2 + r6*B^3 + r7*B^4) * B) in H8 by ring.
+  replace (s2 + s3*B + s4*B^2 + s5*B^3 + s6*B^4 + s7*B^5)
+    with (s2 + (s3 + s4*B + s5*B^2 + s6*B^3 + s7*B^4) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E2 H8]; [| lia | lia | lia].
+  (* Digit 3: regroup and peel. *)
+  replace (r3 + r4*B + r5*B^2 + r6*B^3 + r7*B^4)
+    with (r3 + (r4 + r5*B + r6*B^2 + r7*B^3) * B) in H8 by ring.
+  replace (s3 + s4*B + s5*B^2 + s6*B^3 + s7*B^4)
+    with (s3 + (s4 + s5*B + s6*B^2 + s7*B^3) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E3 H8]; [| lia | lia | lia].
+  (* Digit 4: regroup and peel. *)
+  replace (r4 + r5*B + r6*B^2 + r7*B^3)
+    with (r4 + (r5 + r6*B + r7*B^2) * B) in H8 by ring.
+  replace (s4 + s5*B + s6*B^2 + s7*B^3)
+    with (s4 + (s5 + s6*B + s7*B^2) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E4 H8]; [| lia | lia | lia].
+  (* Digit 5: regroup and peel. *)
+  replace (r5 + r6*B + r7*B^2)
+    with (r5 + (r6 + r7*B) * B) in H8 by ring.
+  replace (s5 + s6*B + s7*B^2)
+    with (s5 + (s6 + s7*B) * B) in H8 by ring.
+  apply base_rep_unique_step in H8 as [E5 H8]; [| lia | lia | lia].
+  (* Digits 6 and 7: already in [r6 + r7*B] form; one more peel gives both. *)
+  apply base_rep_unique_step in H8 as [E6 E7]; [| lia | lia | lia].
+  exact (conj E0 (conj E1 (conj E2 (conj E3 (conj E4 (conj E5 (conj E6 E7))))))).
+Qed.
+  
+
+(* ================================================================== *)
+(** ** Auxiliary lemmas *)
+(* ================================================================== *)
+
 (** If an 8-limb representation with all digits in [[0, B)] equals [x],
     then each digit is [(x / B^k) mod B].
 
-    Strategy: compare the given 8-limb representation against the
-    canonical one from [eval8_limbs], then peel digits one at a time
-    using [base_rep_unique_step]. *)
+    Derived from [eval8_injective] and [eval8_limbs]. *)
 Lemma eval8_digit_unique : forall B r0 r1 r2 r3 r4 r5 r6 r7,
   B > 1 ->
   0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B -> 0 <= r3 < B ->
@@ -187,61 +396,27 @@ Proof.
   intros B r0 r1 r2 r3 r4 r5 r6 r7 HB
          Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hr7 x.
   assert (Hx : 0 <= x < B ^ 8) by (unfold x, eval8; nia).
+  (* Reconstruct x from its canonical limbs, then use injectivity. *)
   pose proof (eval8_limbs B x HB Hx) as Hcanon.
-  (* Both representations equal x; equate them *)
-  assert (Heq : eval8 B r0 r1 r2 r3 r4 r5 r6 r7 =
-                eval8 B (limb B x 0) (limb B x 1) (limb B x 2) (limb B x 3)
-                        (limb B x 4) (limb B x 5) (limb B x 6) (limb B x 7)).
-  { change (x = eval8 B (limb B x 0) (limb B x 1) (limb B x 2) (limb B x 3)
-                        (limb B x 4) (limb B x 5) (limb B x 6) (limb B x 7)).
-    symmetry; assumption. }
-  unfold eval8 in Heq.
   assert (Hlimb : forall i, 0 <= limb B x i < B)
     by (intro; unfold limb; apply Z.mod_pos_bound; lia).
-  (* Peel digits 0–7: re-associate into [a + rest * B] form,
-     apply [base_rep_unique_step], clear consumed hypothesis. *)
-  assert (Heq0 : r0 + (r1 + r2*B + r3*B^2 + r4*B^3 + r5*B^4 + r6*B^5 + r7*B^6) * B =
-    limb B x 0 + (limb B x 1 + limb B x 2*B + limb B x 3*B^2 + limb B x 4*B^3 +
-     limb B x 5*B^4 + limb B x 6*B^5 + limb B x 7*B^6) * B) by nia.
-  apply base_rep_unique_step in Heq0 as [H0 Heq1]; [|lia|assumption|apply Hlimb].
-  clear Heq.
-  assert (Heq1' : r1 + (r2 + r3*B + r4*B^2 + r5*B^3 + r6*B^4 + r7*B^5) * B =
-    limb B x 1 + (limb B x 2 + limb B x 3*B + limb B x 4*B^2 +
-     limb B x 5*B^3 + limb B x 6*B^4 + limb B x 7*B^5) * B) by nia.
-  apply base_rep_unique_step in Heq1' as [H1 Heq2]; [|lia|assumption|apply Hlimb].
-  clear Heq1.
-  assert (Heq2' : r2 + (r3 + r4*B + r5*B^2 + r6*B^3 + r7*B^4) * B =
-    limb B x 2 + (limb B x 3 + limb B x 4*B + limb B x 5*B^2 +
-     limb B x 6*B^3 + limb B x 7*B^4) * B) by nia.
-  apply base_rep_unique_step in Heq2' as [H2 Heq3]; [|lia|assumption|apply Hlimb].
-  clear Heq2.
-  assert (Heq3' : r3 + (r4 + r5*B + r6*B^2 + r7*B^3) * B =
-    limb B x 3 + (limb B x 4 + limb B x 5*B +
-     limb B x 6*B^2 + limb B x 7*B^3) * B) by nia.
-  apply base_rep_unique_step in Heq3' as [H3 Heq4]; [|lia|assumption|apply Hlimb].
-  clear Heq3.
-  assert (Heq4' : r4 + (r5 + r6*B + r7*B^2) * B =
-    limb B x 4 + (limb B x 5 + limb B x 6*B + limb B x 7*B^2) * B) by nia.
-  apply base_rep_unique_step in Heq4' as [H4 Heq5]; [|lia|assumption|apply Hlimb].
-  clear Heq4.
-  assert (Heq5' : r5 + (r6 + r7*B) * B =
-    limb B x 5 + (limb B x 6 + limb B x 7*B) * B) by nia.
-  apply base_rep_unique_step in Heq5' as [H5 Heq6]; [|lia|assumption|apply Hlimb].
-  clear Heq5.
-  assert (Heq6' : r6 + r7*B = limb B x 6 + limb B x 7*B) by nia.
-  apply base_rep_unique_step in Heq6' as [H6 H7]; [|lia|assumption|apply Hlimb].
-  (* Rewrite [limb] back to [(x / B^k) mod B] *)
-  clear - H0 H1 H2 H3 H4 H5 H6 H7.
-  unfold limb in *; simpl Z.of_nat in *.
-  rewrite ?Z.pow_0_r, ?Z.div_1_r, ?Z.pow_1_r in *.
-  repeat split; assumption.
+  (* Hcanon : eval8 B (limb..) = x  i.e. = eval8 B r0..r7 *)
+  symmetry in Hcanon.
+  apply (eval8_injective B _ _ _ _ _ _ _ _
+    (limb B x 0) (limb B x 1) (limb B x 2) (limb B x 3)
+    (limb B x 4) (limb B x 5) (limb B x 6) (limb B x 7)
+    HB Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hr7) in Hcanon;
+    try apply Hlimb.
+  unfold limb in Hcanon; simpl Z.of_nat in Hcanon.
+  rewrite ?Z.pow_0_r, ?Z.div_1_r, ?Z.pow_1_r in Hcanon.
+  exact Hcanon.
 Qed.
 
 (* ================================================================== *)
 (** ** Main theorem *)
 (* ================================================================== *)
 
-(** Schoolbook 4×4 multiplication correctness.
+(** Schoolbook 4x4 multiplication correctness.
 
     Given base [B > 1] and input limbs [a0..a3], [b0..b3] in [[0, B)],
     the accumulate-and-carry algorithm produces output limbs [r0..r7]
@@ -259,7 +434,7 @@ Qed.
        [eval8 B r0..r6 carry6 = product].
     2. Bound [carry6 < B] using [product < B^8].
     3. Apply [eval8_digit_unique] to extract all 8 digit equalities. *)
-Lemma schoolbook_mul_4x4 :
+Theorem schoolbook_mul_4x4 :
   forall (B : Z),
   B > 1 ->
   forall (a0 a1 a2 a3 b0 b1 b2 b3 : Z),
@@ -332,47 +507,36 @@ Proof.
   clear Hprod_expand DM0 DM1 DM2 DM3 DM4 DM5 DM6.
 
   (* Step 2: Bound [carry6 = acc6 / B].
-     Non-negativity: chain [Z.div_pos] through accumulator definitions.
-     Upper bound: [carry6 * B^7 <= product < B^8] implies [carry6 < B]. *)
+     Non-negativity follows from the accumulators being non-negative.
+     Upper bound: delegate to [eval8_last_limb_bound] using [Heval]
+     and [eval4_mul_range]. *)
   assert (Hprod_range : 0 <= product < B ^ 8)
     by (subst product; apply eval4_mul_range; assumption).
+  assert (Hcarry6_nn : 0 <= acc6 / B).
+  { assert (0 <= acc0) by (subst acc0; nia).
+    assert (0 <= acc0 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc1) by (subst acc1; lia).
+    assert (0 <= acc1 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc2) by (subst acc2; lia).
+    assert (0 <= acc2 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc3) by (subst acc3; lia).
+    assert (0 <= acc3 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc4) by (subst acc4; lia).
+    assert (0 <= acc4 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc5) by (subst acc5; lia).
+    assert (0 <= acc5 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc6) by (subst acc6; lia).
+    apply Z.div_pos; lia. }
   assert (Hcarry6_bound : 0 <= acc6 / B < B).
-  { split.
-    { apply Z.div_pos; [|lia].
-      subst acc6.
-      assert (0 <= acc5 / B) by (apply Z.div_pos; [|lia]; subst acc5;
-        assert (0 <= acc4 / B) by (apply Z.div_pos; [|lia]; subst acc4;
-          assert (0 <= acc3 / B) by (apply Z.div_pos; [|lia]; subst acc3;
-            assert (0 <= acc2 / B) by (apply Z.div_pos; [|lia]; subst acc2;
-              assert (0 <= acc1 / B) by (apply Z.div_pos; [|lia]; subst acc1;
-                assert (0 <= acc0 / B) by (apply Z.div_pos; [|lia]; subst acc0; nia);
-              nia); nia); nia); nia); nia).
-      nia. }
-    { (* Lower limbs sum is non-negative, so [carry6 * B^7 <= product] *)
-      assert (Hlower_nn : 0 <= acc0 mod B + acc1 mod B * B + acc2 mod B * B^2 +
-              acc3 mod B * B^3 + acc4 mod B * B^4 + acc5 mod B * B^5 +
-              acc6 mod B * B^6).
-      { assert (0 <= acc0 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc1 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc2 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc3 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc4 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc5 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 <= acc6 mod B < B) by (apply Z.mod_pos_bound; lia).
-        assert (0 < B) by lia.
-        assert (0 < B^2) by (apply Z.pow_pos_nonneg; lia).
-        assert (0 < B^3) by (apply Z.pow_pos_nonneg; lia).
-        assert (0 < B^4) by (apply Z.pow_pos_nonneg; lia).
-        assert (0 < B^5) by (apply Z.pow_pos_nonneg; lia).
-        assert (0 < B^6) by (apply Z.pow_pos_nonneg; lia).
-        nia. }
-      (* [carry6 * B^7 <= product < B^8 = B * B^7], so [carry6 < B] *)
-      assert (acc6 / B * B^7 <= product) by (unfold eval8 in Heval; lia).
-      assert (0 < B ^ 7) by (apply Z.pow_pos_nonneg; lia).
-      apply Z.mul_lt_mono_pos_r with (p := B^7); [lia|].
-      replace (B * B^7) with (B^8) by ring. lia. } }
+  { split; [exact Hcarry6_nn|].
+    apply eval8_last_limb_bound with (r0 := acc0 mod B) (r1 := acc1 mod B)
+      (r2 := acc2 mod B) (r3 := acc3 mod B) (r4 := acc4 mod B)
+      (r5 := acc5 mod B) (r6 := acc6 mod B); try (apply Z.mod_pos_bound; lia); try assumption.
+    rewrite Heval. 
+    exact (proj2 Hprod_range). }
   clear Hprod_range Hacc0 Hacc1 Hacc2 Hacc3 Hacc4 Hacc5 Hacc6
-        Ha0 Ha1 Ha2 Ha3 Hb0 Hb1 Hb2 Hb3.
+        Ha0 Ha1 Ha2 Ha3 Hb0 Hb1 Hb2 Hb3
+        Hcarry6_nn.
 
   (* Step 3: Apply [eval8_digit_unique] and conclude.
      All output limbs lie in [[0, B)] since they are [mod B] results.
@@ -388,8 +552,8 @@ Proof.
   pose proof (eval8_digit_unique B
     (acc0 mod B) (acc1 mod B) (acc2 mod B) (acc3 mod B)
     (acc4 mod B) (acc5 mod B) (acc6 mod B) (acc6 / B)
-    HB Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hcarry6_bound) as Hdigits.
-  rewrite Heval in Hdigits.
+    HB Hr0 Hr1 Hr2 Hr3 Hr4 Hr5 Hr6 Hcarry6_bound) as Hdigits; 
+  rewrite Heval in Hdigits; 
   cbv zeta in Hdigits.
   rewrite (Zmod_small (acc6 / B) B Hcarry6_bound).
   exact Hdigits.

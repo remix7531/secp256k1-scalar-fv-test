@@ -6,7 +6,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
 Require Import VST.floyd.proofauto.
-Require Import scalar_4x64.scalar_4x64.
+Require Import scalar_4x64.Source_scalar_4x64.
 Require Import scalar_4x64.Spec_scalar_4x64.
 
 (* ================================================================= *)

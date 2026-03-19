@@ -19,7 +19,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
 Require Import VST.floyd.proofauto.
-Require Import scalar_4x64.scalar_4x64.
+Require Import scalar_4x64.Source_scalar_4x64.
 Require Import scalar_4x64.Spec_scalar_4x64.
 
 (* ================================================================= *)
@@ -30,6 +30,34 @@ Local Ltac solve_isptr :=
   | H : field_compatible _ _ ?p |- isptr ?p =>
       destruct H as [? _]; destruct p; simpl in *; auto
   end.
+    
+
+(** Peel one slot off the front of an uninitialized tulong sub-array
+    at index [k] inside [tarray tulong 8].  Preconditions:
+    - [0 < k < 8]
+    - The sub-array has exactly [8 - k] elements. *)
+Lemma peel_array_slot : forall sh p k,
+  field_compatible (tarray tulong 8) [] p ->
+  0 < k -> k < 8 ->
+  data_at_ sh (tarray tulong (8 - k))
+    (field_address0 (tarray tulong 8) (SUB k) p)
+  |-- data_at_ sh tulong (field_address (tarray tulong 8) (SUB k) p) *
+      data_at_ sh (tarray tulong (8 - k - 1))
+        (field_address0 (tarray tulong 8) (SUB (k + 1)) p).
+Proof.
+  intros sh p k Hfc Hk0 Hk8.
+  rewrite (split2_data_at__Tarray_app 1 (8 - k) sh tulong
+             (field_address0 (tarray tulong 8) (SUB k) p)) by lia.
+  replace (8 - k - 1) with (8 - (k + 1)) by lia.
+  rewrite data__at_singleton_array_eq.
+  rewrite (field_address0_SUB_SUB tulong (8 - k) 8 1 k p) by lia.
+  replace (1 + k) with (k + 1) by lia.
+  rewrite (arr_field_address0 tulong 8 p (k + 1) Hfc) by lia.
+  rewrite (arr_field_address0 tulong 8 p k Hfc) by lia.
+  rewrite (arr_field_address tulong 8 p k Hfc) by lia.
+  cancel.
+Qed.
+
 
 (* ================================================================= *)
 (** ** Size 2 *)

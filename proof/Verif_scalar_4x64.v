@@ -4,21 +4,12 @@
 
 Require Import VST.floyd.proofauto.
 Require Import compcert.lib.Zbits.
-Require Import scalar_4x64.scalar_4x64.
+Require Import scalar_4x64.Source_scalar_4x64.
 Require Import scalar_4x64.Spec_scalar_4x64.
 Require Import scalar_4x64.Impl_scalar_4x64.
 Require Import scalar_4x64.Helper_array_fold.
 Require Import scalar_4x64.Helper_arithmetic.
 
-
-(* Load only the ATP plugin; "From Hammer Require Import Hammer" re-exports
-   Hammer.Tactics which defines  Ltac forward H := ...  (one argument) and
-   that shadows VST's zero-argument forward, breaking every forward step.
-   Instead we load the Tactics library first, then override the conflicting
-   forward with VST's version, then load the plugin for the hammer tactic. *)
-Require Import Hammer.Tactics.Tactics.
-Ltac forward ::= VST.floyd.forward.forward.
-Declare ML Module "coq-hammer.plugin".
 
 (* ================================================================= *)
 (** ** Proof infrastructure *)
@@ -26,13 +17,28 @@ Declare ML Module "coq-hammer.plugin".
 Lemma limb64_range : forall x i, 0 <= limb64 x i < 2^64.
 Proof. intros. unfold limb64. apply Z.mod_pos_bound. lia. Qed.
 
-(** Bounds hint database *)
-Create HintDb bounds discriminated.
-#[export] Hint Resolve Z.mod_pos_bound : bounds.
-#[export] Hint Resolve Z.div_pos : bounds.
-#[export] Hint Resolve Z.mul_nonneg_nonneg : bounds.
-#[export] Hint Resolve Z.add_nonneg_nonneg : bounds.
-#[export] Hint Resolve limb64_range : bounds.
+(** The product of two 64-bit unsigned integers is at most [(2^64-1)^2]. *)
+Lemma u64_mul_bound : forall (a b : UInt64),
+  u64_val a * u64_val b <= (2^64 - 1) * (2^64 - 1).
+Proof.
+  intros. apply Z.mul_le_mono_nonneg;
+  pose proof (u64_range a); pose proof (u64_range b); lia.
+Qed.
+
+(** [eval4 (2^64) (u64_val (u256_limb x 0)) ... = u256_val x]. *)
+Lemma u256_as_eval4 : forall (x : UInt256),
+  eval4 (2^64)
+    (u64_val (u256_limb x 0)) (u64_val (u256_limb x 1))
+    (u64_val (u256_limb x 2)) (u64_val (u256_limb x 3))
+  = u256_val x.
+Proof.
+  intros. unfold u256_limb; simpl u64_val.
+  change (limb64 (u256_val x) 0) with (limb (2^64) (u256_val x) 0).
+  change (limb64 (u256_val x) 1) with (limb (2^64) (u256_val x) 1).
+  change (limb64 (u256_val x) 2) with (limb (2^64) (u256_val x) 2).
+  change (limb64 (u256_val x) 3) with (limb (2^64) (u256_val x) 3).
+  apply eval4_limbs; [lia | pose proof (u256_range x); lia].
+Qed.
 
 (** [x mod 2^64] is in unsigned 64-bit range. *)
 Lemma mod_u64_range : forall x,
@@ -1199,11 +1205,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr,
                 Tsh, sh_l).
   { (* frame: extract l8[1] from the 7-element sub-array *)
-    rewrite (split2_data_at__Tarray_app 1 7 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 1) l8_ptr)) by lia.
-    rewrite data__at_singleton_array_eq.
-    rewrite (arr_field_address0 tulong 8 l8_ptr 1 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 1 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 1 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 1 *)
@@ -1266,24 +1268,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr,
                 Tsh, sh_l).
   { (* frame: peel l8[2] out of the 6-element sub-array *)
-    (* Step 1: Normalize nested field_address0 to parent coordinates.
-       The sub-array rest lives at:
-         field_address0 (tarray tulong 7) (SUB 1) (offset_val 8 l8_ptr)
-       First rewrite offset_val 8 = field_address0 (tarray tulong 8) (SUB 1),
-       then collapse with field_address0_SUB_SUB. *)
-    change (offset_val 8 l8_ptr)
-      with (offset_val (sizeof tulong * 1) l8_ptr).
-    rewrite <- (arr_field_address0 tulong 8 l8_ptr 1 Hfc) by lia.
-    rewrite (field_address0_SUB_SUB tulong 7 8 1 1 l8_ptr) by lia.
-    (* Now the 6-element sub-array is at field_address0 (tarray tulong 8) (SUB 2) l8_ptr *)
-    (* Step 2: Split 6-element sub-array into 1 + 5 *)
-    rewrite (split2_data_at__Tarray_app 1 6 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 2) l8_ptr)) by lia.
-    (* Step 3: Collapse the singleton *)
-    rewrite data__at_singleton_array_eq.
-    (* Step 4: Normalize addresses to match *)
-    rewrite (arr_field_address0 tulong 8 l8_ptr 2 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 2 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 2 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 2 *)
@@ -1358,15 +1343,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr,
                 Tsh, sh_l).
   { (* frame: peel l8[3] out of the 5-element sub-array *)
-    change (offset_val 16 l8_ptr)
-      with (offset_val (sizeof tulong * 2) l8_ptr).
-    rewrite <- (arr_field_address0 tulong 8 l8_ptr 2 Hfc) by lia.
-    rewrite (field_address0_SUB_SUB tulong 6 8 1 2 l8_ptr) by lia.
-    rewrite (split2_data_at__Tarray_app 1 5 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 3) l8_ptr)) by lia.
-    rewrite data__at_singleton_array_eq.
-    rewrite (arr_field_address0 tulong 8 l8_ptr 3 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 3 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 3 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 3 *)
@@ -1430,15 +1407,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr,
                 Tsh, sh_l).
   { (* frame: peel l8[4] out of the 4-element sub-array *)
-    change (offset_val 24 l8_ptr)
-      with (offset_val (sizeof tulong * 3) l8_ptr).
-    rewrite <- (arr_field_address0 tulong 8 l8_ptr 3 Hfc) by lia.
-    rewrite (field_address0_SUB_SUB tulong 5 8 1 3 l8_ptr) by lia.
-    rewrite (split2_data_at__Tarray_app 1 4 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 4) l8_ptr)) by lia.
-    rewrite data__at_singleton_array_eq.
-    rewrite (arr_field_address0 tulong 8 l8_ptr 4 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 4 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 4 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 4 *)
@@ -1490,15 +1459,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr,
                 Tsh, sh_l).
   { (* frame: peel l8[5] out of the 3-element sub-array *)
-    change (offset_val 32 l8_ptr)
-      with (offset_val (sizeof tulong * 4) l8_ptr).
-    rewrite <- (arr_field_address0 tulong 8 l8_ptr 4 Hfc) by lia.
-    rewrite (field_address0_SUB_SUB tulong 4 8 1 4 l8_ptr) by lia.
-    rewrite (split2_data_at__Tarray_app 1 3 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 5) l8_ptr)) by lia.
-    rewrite data__at_singleton_array_eq.
-    rewrite (arr_field_address0 tulong 8 l8_ptr 5 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 5 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 5 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 5 *)
@@ -1538,15 +1499,7 @@ Proof.
                 field_address (tarray tulong 8) [ArraySubsc 6] l8_ptr,
                 Tsh, sh_l).
   { (* frame: peel l8[6] out of the 2-element sub-array *)
-    change (offset_val 40 l8_ptr)
-      with (offset_val (sizeof tulong * 5) l8_ptr).
-    rewrite <- (arr_field_address0 tulong 8 l8_ptr 5 Hfc) by lia.
-    rewrite (field_address0_SUB_SUB tulong 3 8 1 5 l8_ptr) by lia.
-    rewrite (split2_data_at__Tarray_app 1 2 sh_l tulong
-               (field_address0 (tarray tulong 8) (SUB 6) l8_ptr)) by lia.
-    rewrite data__at_singleton_array_eq.
-    rewrite (arr_field_address0 tulong 8 l8_ptr 6 Hfc) by lia.
-    rewrite (arr_field_address tulong 8 l8_ptr 6 Hfc) by lia.
+    sep_apply (peel_array_slot sh_l l8_ptr 6 Hfc ltac:(lia) ltac:(lia)).
     cancel. }
 
   (* Intro extracted limb and shifted accumulator for round 6 *)
@@ -1560,10 +1513,8 @@ Proof.
   (* l8[7] = acc.c0: first read acc.c0 into temp *)
   forward.
   (* Now store to l8[7] *)
-  change (2 - 1) with 1.
-  rewrite <- (arr_field_address0 tulong 8 l8_ptr 6 Hfc) by lia.
-  rewrite (field_address0_SUB_SUB tulong 2 8 1 6 l8_ptr) by lia.
-  change (1 + 6) with 7.
+  change (8 - 6 - 1) with 1.
+  change (6 + 1) with 7.
   rewrite data__at_singleton_array_eq.
   rewrite (arr_field_address0 tulong 8 l8_ptr 7 Hfc) by lia.
   rewrite <- (arr_field_address tulong 8 l8_ptr 7 Hfc) by lia.
@@ -1623,7 +1574,7 @@ Proof.
     carry6 Hcarry6_eq.
 
   (* Strip Vlong/Int64.repr wrappers *)
-  unfold uint512_to_val, uint64_to_val.
+  unfold uint512_to_val, uint64_to_val;
   change (map (fun z => Vlong (Int64.repr z))
     [u64_val (acc_lo acc0); u64_val (acc_lo acc1);
      u64_val (acc_lo acc2); u64_val (acc_lo acc3);
@@ -1633,7 +1584,7 @@ Proof.
     [limb64 (u512_val (mul_256 a b)) 0; limb64 (u512_val (mul_256 a b)) 1;
      limb64 (u512_val (mul_256 a b)) 2; limb64 (u512_val (mul_256 a b)) 3;
      limb64 (u512_val (mul_256 a b)) 4; limb64 (u512_val (mul_256 a b)) 5;
-     limb64 (u512_val (mul_256 a b)) 6; limb64 (u512_val (mul_256 a b)) 7]).
+     limb64 (u512_val (mul_256 a b)) 6; limb64 (u512_val (mul_256 a b)) 7]);
   f_equal.
 
   (* Unfold record wrappers to pure Z mod/div *)
@@ -1674,28 +1625,14 @@ Proof.
   ) as Hschoolbook.
 
   (* The schoolbook lemma talks about eval4, connect to u256_val *)
-  (* u64_val (u256_limb x k) = limb64 (u256_val x) k = limb (2^64) (u256_val x) k *)
-  assert (Heval_a : eval4 B (u64_val a0) (u64_val a1) (u64_val a2) (u64_val a3) = u256_val a).
-  { subst a0 a1 a2 a3. unfold u256_limb; simpl u64_val.
-    change (limb64 (u256_val a) 0) with (limb B (u256_val a) 0).
-    change (limb64 (u256_val a) 1) with (limb B (u256_val a) 1).
-    change (limb64 (u256_val a) 2) with (limb B (u256_val a) 2).
-    change (limb64 (u256_val a) 3) with (limb B (u256_val a) 3).
-    apply eval4_limbs; [unfold B; lia | pose proof (u256_range a); unfold B; lia]. }
-  assert (Heval_b : eval4 B (u64_val b0) (u64_val b1) (u64_val b2) (u64_val b3) = u256_val b).
-  { subst b0 b1 b2 b3. unfold u256_limb; simpl u64_val.
-    change (limb64 (u256_val b) 0) with (limb B (u256_val b) 0).
-    change (limb64 (u256_val b) 1) with (limb B (u256_val b) 1).
-    change (limb64 (u256_val b) 2) with (limb B (u256_val b) 2).
-    change (limb64 (u256_val b) 3) with (limb B (u256_val b) 3).
-    apply eval4_limbs; [unfold B; lia | pose proof (u256_range b); unfold B; lia]. }
+  assert (Heval_a : eval4 B (u64_val a0) (u64_val a1) (u64_val a2) (u64_val a3) = u256_val a)
+    by (subst a0 a1 a2 a3; exact (u256_as_eval4 a)).
+  assert (Heval_b : eval4 B (u64_val b0) (u64_val b1) (u64_val b2) (u64_val b3) = u256_val b)
+    by (subst b0 b1 b2 b3; exact (u256_as_eval4 b)).
 
   rewrite Heval_a, Heval_b in Hschoolbook.
   unfold mul_256; simpl u512_val.
-  destruct Hschoolbook as [H0 [H1 [H2 [H3 [H4 [H5 [H6 H7]]]]]]].
+  destruct Hschoolbook as (-> & -> & -> & -> & -> & -> & -> & ->).
   subst B.
-  f_equal; [exact H0 | f_equal; [exact H1 | f_equal; [exact H2 |
-    f_equal; [exact H3 | f_equal; [exact H4 | f_equal; [exact H5 |
-      f_equal; [exact H6 | f_equal; exact H7]]]]]]].
-
+  reflexivity.
 Qed.

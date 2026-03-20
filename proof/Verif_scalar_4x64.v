@@ -14,6 +14,13 @@ Require Import scalar_4x64.Helper_arithmetic.
 (* ================================================================= *)
 (** ** Proof infrastructure *)
 
+(* Inhabitant instances needed by deadvars! *)
+Instance Inhabitant_UInt64_ : Inhabitant UInt64 := mkUInt64 0 ltac:(lia).
+Instance Inhabitant_UInt128_ : Inhabitant UInt128 := mkUInt128 0 ltac:(lia).
+Instance Inhabitant_Acc_ : Inhabitant Acc := mkAcc 0 ltac:(lia).
+Instance Inhabitant_UInt256_ : Inhabitant UInt256 := mkUInt256 0 ltac:(lia).
+Instance Inhabitant_UInt512_ : Inhabitant UInt512 := mkUInt512 0 ltac:(lia).
+
 Lemma limb64_range : forall x i, 0 <= limb64 x i < 2^64.
 Proof. intros. unfold limb64. apply Z.mod_pos_bound. lia. Qed.
 
@@ -495,14 +502,14 @@ Proof.
 
   (* Decompose uninitialised struct into .lo and .hi fields *)
   unfold data_at_, field_at_.
-  unfold_data_at (field_at sh (Tstruct __191 noattr) [] _ r_ptr).
-  assert_PROP (field_compatible (Tstruct __191 noattr) [StructField _hi] r_ptr)
+  unfold_data_at (field_at sh t_secp256k1_uint128 [] _ r_ptr).
+  assert_PROP (field_compatible t_secp256k1_uint128 [StructField _hi] r_ptr)
     as Hfc by entailer!.
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
 
   (* r->lo = secp256k1_umul128(a, b, &r->hi) *)
   forward_call (a, b,
-    field_address (Tstruct __191 noattr) [StructField _hi] r_ptr, sh).
+    field_address t_secp256k1_uint128 [StructField _hi] r_ptr, sh).
   Intros vret.
   forward. (* r->lo = _t'1 *)
 
@@ -510,7 +517,7 @@ Proof.
   Exists vret.
   entailer!.
   unfold uint128_to_val.
-  unfold_data_at (data_at sh (Tstruct __191 noattr) _ r_ptr).
+  unfold_data_at (data_at sh t_secp256k1_uint128 _ r_ptr).
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
   cancel.
 Qed.
@@ -942,6 +949,20 @@ Proof.
 Qed.
 
 (* ================================================================= *)
+(** ** sumadd *)
+
+Lemma body_sumadd:
+  semax_body Vprog Gprog f_sumadd sumadd_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** sumadd_fast *)
+
+Lemma body_sumadd_fast:
+  semax_body Vprog Gprog f_sumadd_fast sumadd_fast_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
 (** ** extract *)
 
 Lemma body_extract:
@@ -1023,6 +1044,54 @@ Proof.
 Qed.
 
 (* ================================================================= *)
+(** ** secp256k1_u128_from_u64 *)
+
+Lemma body_secp256k1_u128_from_u64:
+  semax_body Vprog Gprog
+    f_secp256k1_u128_from_u64 secp256k1_u128_from_u64_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_u128_accum_u64 *)
+
+Lemma body_secp256k1_u128_accum_u64:
+  semax_body Vprog Gprog
+    f_secp256k1_u128_accum_u64 secp256k1_u128_accum_u64_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_u128_accum_mul *)
+
+Lemma body_secp256k1_u128_accum_mul:
+  semax_body Vprog Gprog
+    f_secp256k1_u128_accum_mul secp256k1_u128_accum_mul_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_u128_rshift *)
+
+Lemma body_secp256k1_u128_rshift:
+  semax_body Vprog Gprog
+    f_secp256k1_u128_rshift secp256k1_u128_rshift_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_scalar_check_overflow *)
+
+Lemma body_secp256k1_scalar_check_overflow:
+  semax_body Vprog Gprog
+    f_secp256k1_scalar_check_overflow secp256k1_scalar_check_overflow_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_scalar_reduce *)
+
+Lemma body_secp256k1_scalar_reduce:
+  semax_body Vprog Gprog
+    f_secp256k1_scalar_reduce secp256k1_scalar_reduce_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
 
 (** Decompose a list of known Zlength into its elements. *)
@@ -1036,12 +1105,13 @@ Proof.
   reflexivity.
 Qed.
 
-(* Inhabitant instances needed by deadvars! *)
-Instance Inhabitant_UInt64_ : Inhabitant UInt64 := mkUInt64 0 ltac:(lia).
-Instance Inhabitant_UInt128_ : Inhabitant UInt128 := mkUInt128 0 ltac:(lia).
-Instance Inhabitant_Acc_ : Inhabitant Acc := mkAcc 0 ltac:(lia).
-Instance Inhabitant_UInt256_ : Inhabitant UInt256 := mkUInt256 0 ltac:(lia).
-Instance Inhabitant_UInt512_ : Inhabitant UInt512 := mkUInt512 0 ltac:(lia).
+(* ================================================================= *)
+(** ** secp256k1_scalar_reduce_512 *)
+
+Lemma body_secp256k1_scalar_reduce_512:
+  semax_body Vprog Gprog
+    f_secp256k1_scalar_reduce_512 secp256k1_scalar_reduce_512_spec.
+Proof. Admitted.
 
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
@@ -1636,3 +1706,11 @@ Proof.
   subst B.
   reflexivity.
 Qed.
+
+(* ================================================================= *)
+(** ** secp256k1_scalar_mul *)
+
+Lemma body_secp256k1_scalar_mul:
+  semax_body Vprog Gprog
+    f_secp256k1_scalar_mul secp256k1_scalar_mul_spec.
+Proof. Admitted.

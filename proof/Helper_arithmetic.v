@@ -189,8 +189,6 @@ Lemma limbs_eval8 : forall B r0 r1 r2 r3 r4 r5 r6 r7,
   limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 5 = r5 /\
   limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 6 = r6 /\
   limb B (eval8 B r0 r1 r2 r3 r4 r5 r6 r7) 7 = r7.
-Proof.
-Admitted.
 *)
 
 (* ================================================================== *)

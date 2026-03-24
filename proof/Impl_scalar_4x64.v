@@ -140,6 +140,27 @@ Definition uint256_to_val (x : UInt256) : reptype t_secp256k1_uint256 :=
     Vlong (Int64.repr (limb64 v 2));
     Vlong (Int64.repr (limb64 v 3)) ].
 
+(** Widen a [Scalar] (< N < 2^256) to a [UInt256]. *)
+Program Definition scalar_to_u256 (s : Scalar) : UInt256 :=
+  mkUInt256 (scalar_val s) _.
+Next Obligation.
+  destruct s as [v [H0 H1]]; simpl.
+  split; [lia|].
+  unfold secp256k1_N in H1; lia.
+Qed.
+
+(** [scalar_to_val] and [uint256_to_val ∘ scalar_to_u256] agree. *)
+Lemma scalar_to_val_eq (s : Scalar) :
+  scalar_to_val s = uint256_to_val (scalar_to_u256 s).
+Proof.
+  destruct s as [v Hv]; unfold scalar_to_val, uint256_to_val, scalar_to_u256. 
+  unfold limb64. 
+  simpl (Z.of_nat _). 
+  simpl (_ * _). 
+  rewrite Z.div_1_r.
+  reflexivity.
+Qed.
+
 (** Represent a [UInt512] as an 8-limb C array. *)
 Definition uint512_to_val (x : UInt512) : list val :=
   let v := u512_val x in
@@ -385,6 +406,39 @@ Definition secp256k1_u128_rshift_spec : ident * funspec :=
     PROP (u128_val r' = Z.div (u128_val r) (2^64))
     RETURN ()
     SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r') r_ptr).
+
+(* ================================================================= *)
+(** ** secp256k1 order constants *)
+
+(** Limbs of the secp256k1 group order N. *)
+Definition N_0 : Z := 0xBFD25E8CD0364141.
+Definition N_1 : Z := 0xBAAEDCE6AF48A03B.
+Definition N_2 : Z := 0xFFFFFFFFFFFFFFFE.
+Definition N_3 : Z := 0xFFFFFFFFFFFFFFFF.
+
+(** Limbs of 2^256 - N (the "complement"). *)
+Definition N_C_0 : Z := 0x402DA1732FC9BEBF.
+Definition N_C_1 : Z := 0x4551231950B75FC4.
+Definition N_C_2 : Z := 1.
+
+(** N decomposes into its four 64-bit limbs. *)
+Lemma secp256k1_N_limbs :
+  secp256k1_N = N_0 + N_1 * 2^64 + N_2 * 2^128 + N_3 * 2^192.
+Proof. unfold secp256k1_N, N_0, N_1, N_2, N_3. lia. Qed.
+
+(** 2^256 - N decomposes into its three 64-bit limbs. *)
+Lemma secp256k1_N_C_limbs :
+  2^256 - secp256k1_N = N_C_0 + N_C_1 * 2^64 + N_C_2 * 2^128.
+Proof. unfold secp256k1_N, N_C_0, N_C_1, N_C_2. lia. Qed.
+
+(** Range facts for the limb constants. *)
+Lemma N_0_range : 0 <= N_0 < 2^64. Proof. unfold N_0; lia. Qed.
+Lemma N_1_range : 0 <= N_1 < 2^64. Proof. unfold N_1; lia. Qed.
+Lemma N_2_range : 0 <= N_2 < 2^64. Proof. unfold N_2; lia. Qed.
+Lemma N_3_range : 0 <= N_3 < 2^64. Proof. unfold N_3; lia. Qed.
+Lemma N_C_0_range : 0 <= N_C_0 < 2^64. Proof. unfold N_C_0; lia. Qed.
+Lemma N_C_1_range : 0 <= N_C_1 < 2^64. Proof. unfold N_C_1; lia. Qed.
+Lemma N_C_2_range : 0 <= N_C_2 < 2^64. Proof. unfold N_C_2; lia. Qed.
 
 (* ================================================================= *)
 (** ** Overflow check and conditional reduction *)

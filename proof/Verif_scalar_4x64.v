@@ -1046,42 +1046,298 @@ Qed.
 (* ================================================================= *)
 (** ** secp256k1_u128_from_u64 *)
 
+Lemma u64_lt_u128 (a : UInt64) : 0 <= u64_val a < 2^128.
+Proof. destruct a; simpl; lia. Qed.
+
+Lemma u64_uint128_repr (a : UInt64) :
+  uint128_to_val (mkUInt128 (u64_val a) (u64_lt_u128 a)) =
+  (uint64_to_val a, Vlong (Int64.repr 0)).
+Proof.
+  unfold uint128_to_val, uint64_to_val, limb64.
+  simpl Z.of_nat. simpl Z.mul. simpl u128_val. simpl Z.pow.
+  rewrite Z.div_1_r.
+  f_equal.
+  - f_equal. f_equal. apply Z.mod_small. destruct a; simpl; lia.
+  - f_equal. f_equal. rewrite Z.div_small by (destruct a; simpl; lia).
+    reflexivity.
+Qed.
+
 Lemma body_secp256k1_u128_from_u64:
   semax_body Vprog Gprog
     f_secp256k1_u128_from_u64 secp256k1_u128_from_u64_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+  forward. (* r->lo = a *)
+  forward. (* r->hi = 0 *)
+  Exists (mkUInt128 (u64_val a) (u64_lt_u128 a)).
+  rewrite u64_uint128_repr.
+  entailer!.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_u128_accum_u64 *)
 
+Lemma accum_u64_result_range (r : UInt128) (a : UInt64) :
+  u128_val r + u64_val a < 2^128 ->
+  0 <= u128_val r + u64_val a < 2^128.
+Proof. pose proof (u128_range r). pose proof (u64_range a). lia. Qed.
+
 Lemma body_secp256k1_u128_accum_u64:
   semax_body Vprog Gprog
     f_secp256k1_u128_accum_u64 secp256k1_u128_accum_u64_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+  forward. (* t'3 = r->lo *)
+  forward. (* r->lo = t'3 + a *)
+  forward. (* t'1 = r->hi *)
+  forward. (* t'2 = r->lo *)
+  forward. (* r->hi = t'1 + (t'2 < a) *)
+  Exists (mkUInt128 (u128_val r + u64_val a) (accum_u64_result_range r a H)).
+  entailer!.
+  (* SEP: match C values with uint128_to_val witness *)
+  apply derives_refl'. f_equal.
+  unfold uint128_to_val. simpl u128_val. f_equal.
+  - (* lo limb *)
+    f_equal. apply Int64.eqm_samerepr.
+    unfold limb64. simpl Z.of_nat. simpl Z.mul.
+    rewrite !Z.div_1_r.
+    unfold Int64.eqm.
+    change Int64.modulus with (2^64).
+    apply Zbits.eqmod_trans with (y := u128_val r + u64_val a).
+    { apply Zbits.eqmod_add;
+        [apply Zbits.eqmod_sym; apply Zbits.eqmod_mod; lia
+        | apply Zbits.eqmod_refl]. }
+    { apply Zbits.eqmod_mod. lia. }
+  - (* hi limb *)
+    f_equal. apply Int64.eqm_samerepr.
+    rewrite Int.signed_repr by (destruct (Int64.ltu _ _); simpl; rep_lia).
+    rewrite ltu_carry_b2z
+      by (pose proof (limb64_u64_range (u128_val r) 0);
+          pose proof (u64_range a); rep_lia).
+    unfold limb64. simpl Z.of_nat. simpl Z.mul.
+    change Int64.modulus with (2^64).
+    change Int64.eqm with (Zbits.eqmod (2^64)).
+    change (2^0) with 1. rewrite !Z.div_1_r.
+    set (M := 2^64).
+    (* Decompose via eqmod *)
+    apply Zbits.eqmod_trans with (y := u128_val r / M +
+      (if u128_val r mod M + u64_val a <? M then 0 else 1)).
+    { apply Zbits.eqmod_add;
+        [apply Zbits.eqmod_sym; apply Zbits.eqmod_mod; subst M; lia
+        | apply Zbits.eqmod_refl]. }
+    apply Zbits.eqmod_trans with (y := (u128_val r + u64_val a) / M).
+    2:{ apply Zbits.eqmod_mod. subst M; lia. }
+    subst M.
+    pose proof (u128_range r) as [Hr0 Hr1].
+    pose proof (u64_range a) as [Ha0 Ha1].
+    pose proof (Z.mod_pos_bound (u128_val r) (2^64) ltac:(lia)) as [Hmod0 Hmod1].
+    pose proof (Z.div_mod (u128_val r) (2^64) ltac:(lia)) as Hdm.
+    exists 0. rewrite Z.mul_0_l, Z.add_0_l.
+    replace (u128_val r + u64_val a)
+      with (2^64 * (u128_val r / 2^64) + (u128_val r mod 2^64 + u64_val a))
+      by lia.
+    rewrite (Z.mul_comm (2^64)). rewrite Z.div_add_l by lia.
+    destruct (u128_val r mod 2^64 + u64_val a <? 2^64) eqn:Ec;
+      [apply Z.ltb_lt in Ec | apply Z.ltb_ge in Ec].
+    + assert ((u128_val r mod 2^64 + u64_val a) / 2^64 = 0)
+        by (apply Z.div_small; lia).
+      lia.
+    + assert ((u128_val r mod 2^64 + u64_val a) / 2^64 = 1).
+      { symmetry. apply Z.div_unique
+          with (u128_val r mod 2^64 + u64_val a - 2^64).
+        left; lia. lia. }
+      lia.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_u128_accum_mul *)
 
+Lemma mk_u128_sum (r : UInt128) (a b : UInt64)
+  (H : u128_val r + u64_val a * u64_val b < 2^128) :
+  { r' : UInt128 | u128_val r' = u128_val r + u64_val a * u64_val b }.
+Proof.
+  refine (exist _ (mkUInt128 (u128_val r + u64_val a * u64_val b) _) eq_refl).
+  pose proof (u128_range r). pose proof (u64_range a). pose proof (u64_range b). lia.
+Defined.
+
+Lemma accum_mul_limb1 : forall rv prod,
+  0 <= rv -> 0 <= prod ->
+  Int64.eqm
+    (limb64 rv 1 + (limb64 prod 1 +
+      Int.signed (Int.repr
+        (Z.b2z (Int64.ltu
+          (Int64.repr (limb64 rv 0 + limb64 prod 0))
+          (Int64.repr (limb64 prod 0)))))))
+    (limb64 (rv + prod) 1).
+Proof.
+  intros rv prod Hrv Hprod.
+  pose proof (limb64_u64_range rv 0) as Hla0.
+  pose proof (limb64_u64_range prod 0) as Hlb0.
+  rewrite (ltu_carry_b2z (limb64 rv 0) (limb64 prod 0)) by assumption.
+  assert (Hinner :
+    Int.signed (Int.repr (if limb64 rv 0 + limb64 prod 0 <? Int64.modulus then 0 else 1))
+    = (if limb64 rv 0 + limb64 prod 0 <? Int64.modulus then 0 else 1)).
+  { destruct (limb64 rv 0 + limb64 prod 0 <? Int64.modulus); reflexivity. }
+  rewrite Hinner.
+  replace Int64.modulus with (2^64) by reflexivity.
+  apply limb_add_1; lia.
+Qed.
+
 Lemma body_secp256k1_u128_accum_mul:
   semax_body Vprog Gprog
     f_secp256k1_u128_accum_mul secp256k1_u128_accum_mul_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+
+  (* secp256k1_u128_mul(&t, a, b) *)
+  forward_call.
+  Intros vret. subst vret.
+
+  (* r->lo += t.lo *)
+  forward. forward. forward.
+
+  (* r->hi += t.hi + (r->lo < t.lo) *)
+  forward. forward. forward. forward.
+  forward.
+
+  (* Provide witness *)
+  set (prod := u64_val a * u64_val b).
+  set (rv := u128_val r).
+  destruct (mk_u128_sum r a b H) as [r' Hr'].
+  Exists r'.
+  entailer!.
+
+  (* Prove SEP: data_at values match *)
+  apply derives_refl'.
+  f_equal.
+  unfold uint128_to_val.
+  rewrite Hr'. fold rv. fold prod.
+  f_equal; f_equal.
+  + (* limb 0 *)
+    apply Int64.eqm_samerepr.
+    apply limb_add_0.
+    all: subst rv prod;
+      try (destruct r; simpl; lia);
+      apply Z.mul_nonneg_nonneg; destruct a, b; simpl; lia.
+  + (* limb 1 *)
+    apply Int64.eqm_samerepr.
+    apply accum_mul_limb1.
+    all: subst rv prod;
+      try (destruct r; simpl; lia);
+      apply Z.mul_nonneg_nonneg; destruct a, b; simpl; lia.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_u128_rshift *)
 
+Lemma u128_rshift64_range (r : UInt128) :
+  0 <= u128_val r / 2^64 < 2^128.
+Proof.
+  destruct r as [v [H0 H1]]; simpl.
+  split.
+  - apply Z.div_pos; lia.
+  - apply Z.lt_trans with (2^64).
+    + apply Z.div_lt_upper_bound; lia.
+    + lia.
+Qed.
+
+Lemma u128_rshift64_repr (r : UInt128) :
+  uint128_to_val (mkUInt128 (u128_val r / 2^64) (u128_rshift64_range r)) =
+  (Vlong (Int64.repr (limb64 (u128_val r) 1)), Vlong (Int64.repr 0)).
+Proof.
+  destruct r as [v [H0 H1]].
+  unfold uint128_to_val, limb64.
+  simpl Z.of_nat. simpl Z.mul. simpl u128_val.
+  change (Z.pow_pos 2 64) with (2^64).
+  change (let (q, _) := Z.div_eucl v (2^64) in q) with (v / 2^64).
+  rewrite Z.div_1_r.
+  f_equal. f_equal. f_equal.
+  rewrite Z.div_small by
+    (split; [apply Z.div_pos; lia | apply Z.div_lt_upper_bound; lia]).
+  reflexivity.
+Qed.
+
 Lemma body_secp256k1_u128_rshift:
   semax_body Vprog Gprog
     f_secp256k1_u128_rshift secp256k1_u128_rshift_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+  forward. (* _t'1 = r->hi *)
+  forward. (* r->lo = _t'1 *)
+  forward. (* r->hi = 0 *)
+  rewrite Int.signed_repr by rep_lia.
+  Exists (mkUInt128 (u128_val r / 2^64) (u128_rshift64_range r)).
+  rewrite u128_rshift64_repr.
+  entailer!.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_check_overflow *)
 
+(** The C cascade comparison correctly computes [a >= N].
+
+    After [repeat forward], the postcondition is a single pure equality
+    between an [Int.or/and/not] cascade and the spec.  We unfold
+    [Int64.ltu] to expose [zlt] decisions on concrete N-limb values,
+    destruct all six comparisons (2^6 = 64 branches), let [simpl]
+    evaluate the boolean/Int arithmetic, and close every branch with
+    [reflexivity], [discriminate], or [lia]. *)
 Lemma body_secp256k1_scalar_check_overflow:
   semax_body Vprog Gprog
     f_secp256k1_scalar_check_overflow secp256k1_scalar_check_overflow_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+  (* Step through all 14 C statements + the return *)
+  do 15 forward.
+  apply prop_right.
+
+  (* Expose Int64.ltu under the Int64.cmpu wrappers *)
+  unfold Int64.cmpu.
+
+  (* Name the four limbs and establish their ranges *)
+  set (d0 := limb64 (u256_val a) 0).
+  set (d1 := limb64 (u256_val a) 1).
+  set (d2 := limb64 (u256_val a) 2).
+  set (d3 := limb64 (u256_val a) 3).
+  assert (Hd0 : 0 <= d0 < 2^64) by (subst d0; apply Z.mod_pos_bound; lia).
+  assert (Hd1 : 0 <= d1 < 2^64) by (subst d1; apply Z.mod_pos_bound; lia).
+  assert (Hd2 : 0 <= d2 < 2^64) by (subst d2; apply Z.mod_pos_bound; lia).
+  assert (Hd3 : 0 <= d3 < 2^64) by (subst d3; apply Z.mod_pos_bound; lia).
+
+  (* Limb decomposition via u256_as_eval4 *)
+  assert (Hdecomp : u256_val a = d0 + d1 * 2^64 + d2 * 2^128 + d3 * 2^192).
+  { subst d0 d1 d2 d3.
+    pose proof (u256_as_eval4 a) as Heval.
+    unfold eval4, u256_limb in Heval. simpl u64_val in Heval.
+    change ((2^64)^2) with (2^128) in Heval.
+    change ((2^64)^3) with (2^192) in Heval. lia. }
+
+  (* Unfold Int64.ltu to zlt; replace limb unsigned_repr (in range)
+     and evaluate the negative-constant unsigned values to N limbs *)
+  unfold Int64.ltu.
+  rewrite ?(Int64.unsigned_repr d0), ?(Int64.unsigned_repr d1),
+          ?(Int64.unsigned_repr d2), ?(Int64.unsigned_repr d3) by rep_lia.
+  change (Int64.unsigned (Int64.repr (-1))) with N_3 in *.
+  change (Int64.unsigned (Int64.repr (-2))) with N_2 in *.
+  change (Int64.unsigned (Int64.repr (-4994812053365940165))) with N_1 in *.
+  change (Int64.unsigned (Int64.repr (-4624529908474429119))) with N_0 in *.
+
+  (* Destruct all 6 zlt comparisons (d3<N_3, d2<N_2, N_2<d2, d1<N_1,
+     N_1<d1, d0<N_0), creating 64 branches with concrete Z hypotheses *)
+  do 6 match goal with |- context [zlt ?a ?b] => destruct (zlt a b) end.
+
+  (* In each branch: evaluate Z.b2z/Z.lor to 0 or 1, simplify Int
+     arithmetic on small concrete values, then split on the spec *)
+  all: simpl Z.b2z; simpl Z.lor;
+       rewrite ?Int.or_zero_l, ?Int.or_zero, ?Int.and_zero_l, ?Int.and_zero;
+       destruct (Z_lt_dec (u256_val a) secp256k1_N);
+       try reflexivity;
+       try discriminate.
+
+  (* Remaining goals: False from a contradictory combination of limb
+     comparisons and Z_lt_dec.  Unfold N constants and close with lia. *)
+  all: exfalso; unfold secp256k1_N, N_0, N_1, N_2, N_3 in *; lia.
+Qed.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_reduce *)
@@ -1089,6 +1345,14 @@ Proof. Admitted.
 Lemma body_secp256k1_scalar_reduce:
   semax_body Vprog Gprog
     f_secp256k1_scalar_reduce secp256k1_scalar_reduce_spec.
+Proof. Admitted.
+
+(* ================================================================= *)
+(** ** secp256k1_scalar_reduce_512 *)
+
+Lemma body_secp256k1_scalar_reduce_512:
+  semax_body Vprog Gprog
+    f_secp256k1_scalar_reduce_512 secp256k1_scalar_reduce_512_spec.
 Proof. Admitted.
 
 (* ================================================================= *)
@@ -1104,14 +1368,6 @@ Proof.
   destruct l; [| simpl in Hlen; lia].
   reflexivity.
 Qed.
-
-(* ================================================================= *)
-(** ** secp256k1_scalar_reduce_512 *)
-
-Lemma body_secp256k1_scalar_reduce_512:
-  semax_body Vprog Gprog
-    f_secp256k1_scalar_reduce_512 secp256k1_scalar_reduce_512_spec.
-Proof. Admitted.
 
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
@@ -1713,4 +1969,39 @@ Qed.
 Lemma body_secp256k1_scalar_mul:
   semax_body Vprog Gprog
     f_secp256k1_scalar_mul secp256k1_scalar_mul_spec.
-Proof. Admitted.
+Proof.
+  start_function.
+
+  (* Rewrite scalar representation to uint256 for mul_512 call *)
+  rewrite !scalar_to_val_eq.
+  change t_secp256k1_scalar with t_secp256k1_uint256.
+
+  (* secp256k1_scalar_mul_512(l, a, b) *)
+  forward_call (v_l, a_ptr, b_ptr,
+    scalar_to_u256 a, scalar_to_u256 b,
+    Tsh, sh_a, sh_b).
+
+  Intros l.
+
+  (* secp256k1_scalar_reduce_512(r, l) *)
+  forward_call (r_ptr, v_l, l, sh_r, Tsh).
+
+  Intros r.
+
+  (* Postcondition *)
+  Exists r.
+  entailer!.
+  - (* r = scalar_mul a b *)
+    destruct r as [rv Hr].
+    destruct a as [av Ha].
+    destruct b as [bv Hb].
+    unfold scalar_mul, scalar_to_u256, mul_256 in *.
+    simpl in *.
+    subst. 
+    f_equal.
+    apply proof_irr.
+  - (* Rewrite uint256 back to scalar representation *)
+    rewrite <- !scalar_to_val_eq.
+    change t_secp256k1_uint256 with t_secp256k1_scalar.
+    cancel.
+Qed.

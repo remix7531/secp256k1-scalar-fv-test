@@ -556,3 +556,78 @@ Proof.
   rewrite (Zmod_small (acc6 / B) B Hcarry6_bound).
   exact Hdigits.
 Qed.
+
+(* ================================================================= *)
+(** ** Carry-chain identity for 4-limb ripple addition *)
+
+(** The [secp256k1_scalar_reduce] function ripple-adds [ov * C] (where
+    [C = 2^256 - N] expressed as three limbs [c0, c1, c2]) into a
+    4-limb value [val = d0 + d1*B + d2*B^2 + d3*B^3].  At each
+    stage the low limb is extracted ([mod B]) and the carry is
+    propagated ([/ B]).
+
+    This lemma shows that the four extracted limbs reconstruct exactly
+    to [val + ov * C], provided the result fits in four limbs ([< B^4]).
+    The proof telescopes: at each step, the Euclidean division identity
+    [t_i = B * (t_i / B) + (t_i mod B)] absorbs the carry into the
+    next accumulator.  The final carry is zero because the result is
+    bounded. *)
+Lemma reduce_carry_chain :
+  forall B d0 d1 d2 d3 c0 c1 c2 (ov : Z),
+    1 < B ->
+    0 <= d0 < B -> 0 <= d1 < B -> 0 <= d2 < B -> 0 <= d3 < B ->
+    0 <= c0 -> 0 <= c1 -> 0 <= c2 -> 0 <= ov ->
+    let B2 := B * B in let B3 := B * B * B in let B4 := B * B * B * B in
+    let val := d0 + d1 * B + d2 * B2 + d3 * B3 in
+    let C := c0 + c1 * B + c2 * B2 in
+    0 <= val + ov * C < B4 ->
+    let t0 := d0 + ov * c0 in
+    let t1 := t0 / B + d1 + ov * c1 in
+    let t2 := t1 / B + d2 + ov * c2 in
+    let t3 := t2 / B + d3 in
+    (t0 mod B) + (t1 mod B) * B + (t2 mod B) * B2 + (t3 mod B) * B3
+    = val + ov * C.
+Proof.
+  intros B d0 d1 d2 d3 c0 c1 c2 ov HB Hd0 Hd1 Hd2 Hd3 Hc0 Hc1 Hc2 Hov
+    B2 B3 B4 val C Hresult t0 t1 t2 t3.
+
+  (* Non-negativity of intermediate accumulators *)
+  assert (Ht0_nn : 0 <= t0) by (subst t0; apply Z.add_nonneg_nonneg; [lia|]; apply Z.mul_nonneg_nonneg; lia).
+  assert (Ht1_nn : 0 <= t1) by (subst t1; apply Z.add_nonneg_nonneg; [|apply Z.mul_nonneg_nonneg; lia]; apply Z.add_nonneg_nonneg; [apply Z.div_pos; lia|lia]).
+  assert (Ht2_nn : 0 <= t2) by (subst t2; apply Z.add_nonneg_nonneg; [|apply Z.mul_nonneg_nonneg; lia]; apply Z.add_nonneg_nonneg; [apply Z.div_pos; lia|lia]).
+
+  (* Euclidean division: t_i = B * q_i + m_i *)
+  set (q0 := t0 / B). set (m0 := t0 mod B).
+  set (q1 := t1 / B). set (m1 := t1 mod B).
+  set (q2 := t2 / B). set (m2 := t2 mod B).
+  assert (Ht0_eq : t0 = B * q0 + m0) by (subst q0 m0; apply Z_div_mod_eq_full).
+  assert (Ht1_eq : t1 = B * q1 + m1) by (subst q1 m1; apply Z_div_mod_eq_full).
+  assert (Ht2_eq : t2 = B * q2 + m2) by (subst q2 m2; apply Z_div_mod_eq_full).
+
+  (* t_{i+1} = q_i + d_{i+1} + ov*c_{i+1} *)
+  assert (Ht1_def : t1 = q0 + d1 + ov * c1) by (subst t1 q0; ring).
+  assert (Ht2_def : t2 = q1 + d2 + ov * c2) by (subst t2 q1; ring).
+  assert (Ht3_def : t3 = q2 + d3) by (subst t3 q2; ring).
+
+  (* Remainder bounds *)
+  assert (Hm0 : 0 <= m0 < B) by (subst m0; apply Z.mod_pos_bound; lia).
+  assert (Hm1 : 0 <= m1 < B) by (subst m1; apply Z.mod_pos_bound; lia).
+  assert (Hm2 : 0 <= m2 < B) by (subst m2; apply Z.mod_pos_bound; lia).
+
+  (* Telescoping: substitute div/mod at each round *)
+  assert (Hstep0 : val + ov * C = t0 + (d1 + ov * c1) * B + (d2 + ov * c2) * B2 + d3 * B3) by (subst val C t0 B2 B3; ring).
+  assert (Hstep1 : val + ov * C = m0 + t1 * B + (d2 + ov * c2) * B2 + d3 * B3) by (rewrite Hstep0, Ht0_eq, Ht1_def; subst B2 B3; ring).
+  assert (Hstep2 : val + ov * C = m0 + m1 * B + t2 * B2 + d3 * B3) by (rewrite Hstep1, Ht1_eq, Ht2_def; subst B2 B3; ring).
+  assert (Hstep3 : val + ov * C = m0 + m1 * B + m2 * B2 + t3 * B3) by (rewrite Hstep2, Ht2_eq, Ht3_def; subst B2 B3; ring).
+
+  (* Final carry is zero: t3 < B (because result < B^4) *)
+  assert (Ht3_nonneg : 0 <= t3) by (rewrite Ht3_def; assert (0 <= q2) by (subst q2; apply Z.div_pos; lia); lia).
+  assert (Ht3_small : t3 < B).
+  { assert (0 <= m0 + m1 * B + m2 * B2) by (apply Z.add_nonneg_nonneg; [apply Z.add_nonneg_nonneg; [lia|apply Z.mul_nonneg_nonneg; lia]|subst B2; apply Z.mul_nonneg_nonneg; [lia|apply Z.mul_nonneg_nonneg; lia]]).
+    assert (0 < B3) by (subst B3; apply Z.mul_pos_pos; [apply Z.mul_pos_pos|]; lia).
+    set (lo := m0 + m1 * B + m2 * B2) in *. set (hi := t3 * B3) in *.
+    assert (hi < B * B3) by (rewrite Hstep3 in Hresult; subst B4; lia).
+    subst hi. destruct (Z_lt_dec t3 B) as [|Hge]; [assumption|exfalso].
+    assert (B * B3 <= t3 * B3) by (apply Z.mul_le_mono_nonneg_r; lia). lia. }
+  rewrite Z.mod_small by lia. lia.
+Qed.

@@ -14,6 +14,10 @@
 From Stdlib Require Import ZArith.
 From Stdlib Require Import Lia.
 From Hammer Require Import Hammer.
+
+Require Import scalar_4x64.Impl_scalar_4x64.
+Require Import scalar_4x64.Spec_scalar_4x64.
+
 Open Scope Z_scope.
 
 Set Hammer ATPLimit 30.
@@ -631,3 +635,41 @@ Proof.
     assert (B * B3 <= t3 * B3) by (apply Z.mul_le_mono_nonneg_r; lia). lia. }
   rewrite Z.mod_small by lia. lia.
 Qed.
+
+(* ================================================================== *)
+(** ** Modular folding lemmas for secp256k1_scalar_reduce_512        *)
+(* ================================================================== *)
+
+(** 2^256 ≡ N_C (mod N), so replacing [hi * 2^256] with [hi * N_C]
+    preserves the residue mod N. *)
+Lemma fold_256_mod : forall lo hi : Z,
+  (lo + hi * (N_C_0 + N_C_1 * 2^64 + N_C_2 * 2^128)) mod secp256k1_N
+  = (lo + hi * 2^256) mod secp256k1_N.
+Proof.
+Admitted.
+
+(** Stage 3 + final reduce: Reduce 258 → 256 bits, then subtract overflow.
+    r = p[0..3] + p4 * N_C, then reduce by ov copies of N. *)
+Lemma reduce_stage3_mod :
+  forall (p0 p1 p2 p3 p4 : Z),
+  0 <= p0 < 2^64 -> 0 <= p1 < 2^64 ->
+  0 <= p2 < 2^64 -> 0 <= p3 < 2^64 ->
+  0 <= p4 <= 3 ->
+  let c0a    := p0 + N_C_0 * p4 in
+  let lo0    := c0a mod 2^64 in
+  let carry0 := c0a / 2^64 in
+  let c1     := carry0 + p1 + N_C_1 * p4 in
+  let lo1    := c1 mod 2^64 in
+  let carry1 := c1 / 2^64 in
+  let c2     := carry1 + p2 + p4 in      (* N_C_2 = 1 *)
+  let lo2    := c2 mod 2^64 in
+  let carry2 := c2 / 2^64 in
+  let c3     := carry2 + p3 in
+  let lo3    := c3 mod 2^64 in
+  let hi     := c3 / 2^64 in
+  let r_z    := lo0 + lo1 * 2^64 + lo2 * 2^128 + lo3 * 2^192 in
+  let ov     := hi + (if Z_lt_dec r_z secp256k1_N then 0 else 1) in
+  r_z + ov * (2^256 - secp256k1_N)
+  = (p0 + p1 * 2^64 + p2 * 2^128 + p3 * 2^192 + p4 * 2^256) mod secp256k1_N.
+Proof.
+Admitted.

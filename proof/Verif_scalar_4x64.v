@@ -2370,8 +2370,8 @@ Proof.
           * (N_C_0 + N_C_1 * 2^64 + N_C_2 * 2^128)).
     { unfold N_C_2. nia. }
 
-    rewrite Htotal. 
-    rewrite fold_256_mod.
+    rewrite Htotal.
+    rewrite <- secp256k1_N_C_limbs, fold_sub_mod.
     (* Goal: (lo + hi * 2^256) mod N = u512_val l mod N *)
     f_equal.
 
@@ -2814,7 +2814,7 @@ Proof.
       simpl u64_val in *. 
       nia. }
 
-    rewrite Htotal, fold_256_mod.
+    rewrite Htotal, <- secp256k1_N_C_limbs, fold_sub_mod.
     replace (m0v + u64_val m1_u64 * 2^64 + u64_val m2_u64 * 2^128 + u64_val m3_u64 * 2^192
              + (u64_val m4_u64 + u64_val m5_u64 * 2^64 + m6_val * 2^128) * 2^256)
       with (u64_val m0_u64 + u64_val m1_u64 * 2^64 + u64_val m2_u64 * 2^128

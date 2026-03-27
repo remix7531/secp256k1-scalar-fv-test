@@ -640,13 +640,16 @@ Qed.
 (** ** Modular folding lemmas for secp256k1_scalar_reduce_512        *)
 (* ================================================================== *)
 
-(** 2^256 ≡ N_C (mod N), so replacing [hi * 2^256] with [hi * N_C]
-    preserves the residue mod N. *)
-Lemma fold_256_mod : forall lo hi : Z,
-  (lo + hi * (N_C_0 + N_C_1 * 2^64 + N_C_2 * 2^128)) mod secp256k1_N
-  = (lo + hi * 2^256) mod secp256k1_N.
+(** General modular folding: subtracting multiples of [n] inside a
+    product does not change the residue. *)
+Lemma fold_sub_mod : forall a b x n : Z,
+  (a + b * (x - n)) mod n = (a + b * x) mod n.
 Proof.
-Admitted.
+  intros a b x n.
+  replace (a + b * (x - n)) with (a + b * x + (-b) * n) by ring.
+  rewrite Z_mod_plus_full.
+  reflexivity.
+Qed.
 
 (** Stage 3 + final reduce: Reduce 258 → 256 bits, then subtract overflow.
     r = p[0..3] + p4 * N_C, then reduce by ov copies of N. *)

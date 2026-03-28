@@ -13,14 +13,8 @@
 
 From Stdlib Require Import ZArith.
 From Stdlib Require Import Lia.
-From Hammer Require Import Hammer.
-
-Require Import scalar_4x64.Impl_scalar_4x64.
-Require Import scalar_4x64.Spec_scalar_4x64.
 
 Open Scope Z_scope.
-
-Set Hammer ATPLimit 30.
 
 (* ================================================================== *)
 (** ** Definitions *)
@@ -218,6 +212,30 @@ Qed.
 (* ================================================================== *)
 (** ** Auxiliary lemmas *)
 (* ================================================================== *)
+
+(** A 4-limb little-endian value fits in [[0, B^4)]. *)
+Lemma eval4_bound : forall B a0 a1 a2 a3,
+  B > 1 ->
+  0 <= a0 < B -> 0 <= a1 < B -> 0 <= a2 < B -> 0 <= a3 < B ->
+  0 <= a0 + a1 * B + a2 * (B * B) + a3 * (B * B * B) < B * B * B * B.
+Proof.
+  intros B a0 a1 a2 a3 HB H0 H1 H2 H3.
+  assert (0 <= a1 * B) by (apply Z.mul_nonneg_nonneg; lia).
+  assert (0 <= a2 * (B * B))
+    by (apply Z.mul_nonneg_nonneg; [lia|apply Z.mul_nonneg_nonneg; lia]).
+  assert (0 <= a3 * (B * B * B))
+    by (apply Z.mul_nonneg_nonneg;
+        [lia|apply Z.mul_nonneg_nonneg; [apply Z.mul_nonneg_nonneg; lia|lia]]).
+  assert (a1 * B <= (B - 1) * B) by (apply Z.mul_le_mono_nonneg_r; lia).
+  assert (a2 * (B * B) <= (B - 1) * (B * B))
+    by (apply Z.mul_le_mono_nonneg_r; [apply Z.mul_nonneg_nonneg; lia|lia]).
+  assert (a3 * (B * B * B) <= (B - 1) * (B * B * B))
+    by (apply Z.mul_le_mono_nonneg_r;
+        [apply Z.mul_nonneg_nonneg; [apply Z.mul_nonneg_nonneg; lia|lia]|lia]).
+  assert ((B - 1) + (B - 1) * B + (B - 1) * (B * B) + (B - 1) * (B * B * B)
+          = B * B * B * B - 1) by ring.
+  lia.
+Qed.
 
 (** The product of two 4-limb numbers fits in 8 limbs. *)
 Lemma eval4_mul_range : forall B a0 a1 a2 a3 b0 b1 b2 b3,
@@ -562,20 +580,18 @@ Proof.
 Qed.
 
 (* ================================================================= *)
-(** ** Carry-chain identity for 4-limb ripple addition *)
+(** ** Carry-chain identity for 4-limb ripple addition               *)
+(* ================================================================= *)
 
-(** The [secp256k1_scalar_reduce] function ripple-adds [ov * C] (where
-    [C = 2^256 - N] expressed as three limbs [c0, c1, c2]) into a
-    4-limb value [val = d0 + d1*B + d2*B^2 + d3*B^3].  At each
+(** The carry chain ripple-adds [ov * C] (where [C = c0 + c1*B + c2*B^2])
+    into a 4-limb value [val = d0 + d1*B + d2*B^2 + d3*B^3].  At each
     stage the low limb is extracted ([mod B]) and the carry is
     propagated ([/ B]).
 
-    This lemma shows that the four extracted limbs reconstruct exactly
-    to [val + ov * C], provided the result fits in four limbs ([< B^4]).
-    The proof telescopes: at each step, the Euclidean division identity
-    [t_i = B * (t_i / B) + (t_i mod B)] absorbs the carry into the
-    next accumulator.  The final carry is zero because the result is
-    bounded. *)
+    The four extracted limbs plus the final carry [hi] reconstruct
+    exactly to [val + ov * C].  When the result fits in [B^4] the
+    carry is zero; when it fits in [2 * B^4] the carry is at most 1. *)
+
 Lemma reduce_carry_chain :
   forall B d0 d1 d2 d3 c0 c1 c2 (ov : Z),
     1 < B ->
@@ -584,29 +600,47 @@ Lemma reduce_carry_chain :
     let B2 := B * B in let B3 := B * B * B in let B4 := B * B * B * B in
     let val := d0 + d1 * B + d2 * B2 + d3 * B3 in
     let C := c0 + c1 * B + c2 * B2 in
-    0 <= val + ov * C < B4 ->
+    0 <= val + ov * C < 2 * B4 ->
     let t0 := d0 + ov * c0 in
     let t1 := t0 / B + d1 + ov * c1 in
     let t2 := t1 / B + d2 + ov * c2 in
     let t3 := t2 / B + d3 in
-    (t0 mod B) + (t1 mod B) * B + (t2 mod B) * B2 + (t3 mod B) * B3
-    = val + ov * C.
+    let r_z := (t0 mod B) + (t1 mod B) * B + (t2 mod B) * B2 + (t3 mod B) * B3 in
+    let hi := t3 / B in
+    r_z + hi * B4 = val + ov * C
+    /\ 0 <= r_z < B4
+    /\ 0 <= hi <= 1.
 Proof.
   intros B d0 d1 d2 d3 c0 c1 c2 ov HB Hd0 Hd1 Hd2 Hd3 Hc0 Hc1 Hc2 Hov
-    B2 B3 B4 val C Hresult t0 t1 t2 t3.
+    B2 B3 B4 val C Hresult t0 t1 t2 t3 r_z hi.
 
   (* Non-negativity of intermediate accumulators *)
-  assert (Ht0_nn : 0 <= t0) by (subst t0; apply Z.add_nonneg_nonneg; [lia|]; apply Z.mul_nonneg_nonneg; lia).
-  assert (Ht1_nn : 0 <= t1) by (subst t1; apply Z.add_nonneg_nonneg; [|apply Z.mul_nonneg_nonneg; lia]; apply Z.add_nonneg_nonneg; [apply Z.div_pos; lia|lia]).
-  assert (Ht2_nn : 0 <= t2) by (subst t2; apply Z.add_nonneg_nonneg; [|apply Z.mul_nonneg_nonneg; lia]; apply Z.add_nonneg_nonneg; [apply Z.div_pos; lia|lia]).
+  assert (Ht0_nn : 0 <= t0).
+  { subst t0. apply Z.add_nonneg_nonneg.
+    - lia.
+    - apply Z.mul_nonneg_nonneg; lia. }
+  assert (Ht1_nn : 0 <= t1).
+  { subst t1. apply Z.add_nonneg_nonneg.
+    - apply Z.add_nonneg_nonneg.
+      + apply Z.div_pos; lia.
+      + lia.
+    - apply Z.mul_nonneg_nonneg; lia. }
+  assert (Ht2_nn : 0 <= t2).
+  { subst t2. apply Z.add_nonneg_nonneg.
+    - apply Z.add_nonneg_nonneg.
+      + apply Z.div_pos; lia.
+      + lia.
+    - apply Z.mul_nonneg_nonneg; lia. }
 
   (* Euclidean division: t_i = B * q_i + m_i *)
   set (q0 := t0 / B). set (m0 := t0 mod B).
   set (q1 := t1 / B). set (m1 := t1 mod B).
   set (q2 := t2 / B). set (m2 := t2 mod B).
+  set (m3 := t3 mod B).
   assert (Ht0_eq : t0 = B * q0 + m0) by (subst q0 m0; apply Z_div_mod_eq_full).
   assert (Ht1_eq : t1 = B * q1 + m1) by (subst q1 m1; apply Z_div_mod_eq_full).
   assert (Ht2_eq : t2 = B * q2 + m2) by (subst q2 m2; apply Z_div_mod_eq_full).
+  assert (Ht3_eq : t3 = B * hi + m3) by (subst hi m3; apply Z_div_mod_eq_full).
 
   (* t_{i+1} = q_i + d_{i+1} + ov*c_{i+1} *)
   assert (Ht1_def : t1 = q0 + d1 + ov * c1) by (subst t1 q0; ring).
@@ -617,27 +651,80 @@ Proof.
   assert (Hm0 : 0 <= m0 < B) by (subst m0; apply Z.mod_pos_bound; lia).
   assert (Hm1 : 0 <= m1 < B) by (subst m1; apply Z.mod_pos_bound; lia).
   assert (Hm2 : 0 <= m2 < B) by (subst m2; apply Z.mod_pos_bound; lia).
+  assert (Hm3 : 0 <= m3 < B) by (subst m3; apply Z.mod_pos_bound; lia).
 
   (* Telescoping: substitute div/mod at each round *)
-  assert (Hstep0 : val + ov * C = t0 + (d1 + ov * c1) * B + (d2 + ov * c2) * B2 + d3 * B3) by (subst val C t0 B2 B3; ring).
-  assert (Hstep1 : val + ov * C = m0 + t1 * B + (d2 + ov * c2) * B2 + d3 * B3) by (rewrite Hstep0, Ht0_eq, Ht1_def; subst B2 B3; ring).
-  assert (Hstep2 : val + ov * C = m0 + m1 * B + t2 * B2 + d3 * B3) by (rewrite Hstep1, Ht1_eq, Ht2_def; subst B2 B3; ring).
-  assert (Hstep3 : val + ov * C = m0 + m1 * B + m2 * B2 + t3 * B3) by (rewrite Hstep2, Ht2_eq, Ht3_def; subst B2 B3; ring).
+  assert (Hstep0 : val + ov * C = t0 + (d1 + ov * c1) * B + (d2 + ov * c2) * B2 + d3 * B3)
+    by (subst val C t0 B2 B3; ring).
+  assert (Hstep1 : val + ov * C = m0 + t1 * B + (d2 + ov * c2) * B2 + d3 * B3)
+    by (rewrite Hstep0, Ht0_eq, Ht1_def; subst B2 B3; ring).
+  assert (Hstep2 : val + ov * C = m0 + m1 * B + t2 * B2 + d3 * B3)
+    by (rewrite Hstep1, Ht1_eq, Ht2_def; subst B2 B3; ring).
+  assert (Hstep3 : val + ov * C = m0 + m1 * B + m2 * B2 + t3 * B3)
+    by (rewrite Hstep2, Ht2_eq, Ht3_def; subst B2 B3; ring).
 
-  (* Final carry is zero: t3 < B (because result < B^4) *)
-  assert (Ht3_nonneg : 0 <= t3) by (rewrite Ht3_def; assert (0 <= q2) by (subst q2; apply Z.div_pos; lia); lia).
-  assert (Ht3_small : t3 < B).
-  { assert (0 <= m0 + m1 * B + m2 * B2) by (apply Z.add_nonneg_nonneg; [apply Z.add_nonneg_nonneg; [lia|apply Z.mul_nonneg_nonneg; lia]|subst B2; apply Z.mul_nonneg_nonneg; [lia|apply Z.mul_nonneg_nonneg; lia]]).
-    assert (0 < B3) by (subst B3; apply Z.mul_pos_pos; [apply Z.mul_pos_pos|]; lia).
-    set (lo := m0 + m1 * B + m2 * B2) in *. set (hi := t3 * B3) in *.
-    assert (hi < B * B3) by (rewrite Hstep3 in Hresult; subst B4; lia).
-    subst hi. destruct (Z_lt_dec t3 B) as [|Hge]; [assumption|exfalso].
-    assert (B * B3 <= t3 * B3) by (apply Z.mul_le_mono_nonneg_r; lia). lia. }
-  rewrite Z.mod_small by lia. lia.
+  (* Expand t3 = B * hi + m3 in the telescoped identity *)
+  assert (Hstep4 : val + ov * C = m0 + m1 * B + m2 * B2 + m3 * B3 + hi * B4)
+    by (rewrite Hstep3, Ht3_eq; subst B2 B3 B4; ring).
+
+  (* r_z = m0 + m1*B + m2*B2 + m3*B3 *)
+  assert (Hr_z_eq : r_z = m0 + m1 * B + m2 * B2 + m3 * B3)
+    by (subst r_z m0 m1 m2 m3; reflexivity).
+
+  (* r_z non-negativity *)
+  assert (Hr_z_nn : 0 <= r_z).
+  { rewrite Hr_z_eq.
+    assert (0 <= m1 * B) by (apply Z.mul_nonneg_nonneg; lia).
+    assert (0 <= m2 * B2).
+    { subst B2. apply Z.mul_nonneg_nonneg.
+      - lia.
+      - apply Z.mul_nonneg_nonneg; lia. }
+    assert (0 <= m3 * B3).
+    { subst B3. apply Z.mul_nonneg_nonneg.
+      - lia.
+      - apply Z.mul_nonneg_nonneg.
+        + apply Z.mul_nonneg_nonneg; lia.
+        + lia. }
+    lia. }
+
+  (* r_z < B4 via geometric identity: sum of (B-1)*B^i = B^4 - 1 *)
+  assert (Hr_z_ub : r_z < B4).
+  { rewrite Hr_z_eq.
+    assert (0 <= B2) by (subst B2; apply Z.mul_nonneg_nonneg; lia).
+    assert (0 <= B3).
+    { subst B3. apply Z.mul_nonneg_nonneg.
+      - apply Z.mul_nonneg_nonneg; lia.
+      - lia. }
+    assert (m1 * B <= (B - 1) * B) by (apply Z.mul_le_mono_nonneg_r; lia).
+    assert (m2 * B2 <= (B - 1) * B2) by (apply Z.mul_le_mono_nonneg_r; lia).
+    assert (m3 * B3 <= (B - 1) * B3) by (apply Z.mul_le_mono_nonneg_r; lia).
+    assert ((B - 1) + (B - 1) * B + (B - 1) * B2 + (B - 1) * B3 = B4 - 1)
+      by (subst B2 B3 B4; ring).
+    lia. }
+
+  (* hi bounds *)
+  assert (Ht3_nonneg : 0 <= t3).
+  { rewrite Ht3_def.
+    assert (0 <= q2) by (subst q2; apply Z.div_pos; lia). lia. }
+  assert (Hhi_nn : 0 <= hi) by (subst hi; apply Z.div_pos; lia).
+  assert (0 < B4).
+  { subst B4. apply Z.mul_pos_pos.
+    - apply Z.mul_pos_pos.
+      + apply Z.mul_pos_pos; lia.
+      + lia.
+    - lia. }
+  assert (Hhi_le1 : hi <= 1).
+  { destruct (Z_lt_dec hi 2) as [Hlt2|Hge2].
+    - lia.
+    - exfalso.
+      assert (2 * B4 <= hi * B4) by (apply Z.mul_le_mono_nonneg_r; lia).
+      lia. }
+
+  repeat split; lia.
 Qed.
 
 (* ================================================================== *)
-(** ** Modular folding lemmas for secp256k1_scalar_reduce_512        *)
+(** ** Modular folding lemmas                                         *)
 (* ================================================================== *)
 
 (** General modular folding: subtracting multiples of [n] inside a
@@ -651,28 +738,14 @@ Proof.
   reflexivity.
 Qed.
 
-(** Stage 3 + final reduce: Reduce 258 → 256 bits, then subtract overflow.
-    r = p[0..3] + p4 * N_C, then reduce by ov copies of N. *)
-Lemma reduce_stage3_mod :
-  forall (p0 p1 p2 p3 p4 : Z),
-  0 <= p0 < 2^64 -> 0 <= p1 < 2^64 ->
-  0 <= p2 < 2^64 -> 0 <= p3 < 2^64 ->
-  0 <= p4 <= 3 ->
-  let c0a    := p0 + N_C_0 * p4 in
-  let lo0    := c0a mod 2^64 in
-  let carry0 := c0a / 2^64 in
-  let c1     := carry0 + p1 + N_C_1 * p4 in
-  let lo1    := c1 mod 2^64 in
-  let carry1 := c1 / 2^64 in
-  let c2     := carry1 + p2 + p4 in      (* N_C_2 = 1 *)
-  let lo2    := c2 mod 2^64 in
-  let carry2 := c2 / 2^64 in
-  let c3     := carry2 + p3 in
-  let lo3    := c3 mod 2^64 in
-  let hi     := c3 / 2^64 in
-  let r_z    := lo0 + lo1 * 2^64 + lo2 * 2^128 + lo3 * 2^192 in
-  let ov     := hi + (if Z_lt_dec r_z secp256k1_N then 0 else 1) in
-  r_z + ov * (2^256 - secp256k1_N)
-  = (p0 + p1 * 2^64 + p2 * 2^128 + p3 * 2^192 + p4 * 2^256) mod secp256k1_N.
+(** Conditional subtraction: given a value [r + hi * 2^256] with
+    [0 <= r < 2^256] and [0 <= hi <= 1], compute [val mod N] by
+    subtracting at most 2 copies of [N]. *)
+Lemma cond_sub_mod : forall r hi val N,
+  N > 2^255 -> 2^256 - N < N ->
+  0 <= r < 2^256 -> 0 <= hi <= 1 ->
+  r + hi * 2^256 = val ->
+  r + (hi + (if Z_lt_dec r N then 0 else 1)) * (2^256 - N)
+  = val mod N.
 Proof.
 Admitted.

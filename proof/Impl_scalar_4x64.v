@@ -57,7 +57,7 @@ Next Obligation.
   simpl.
   split.
   - apply Z.mul_nonneg_nonneg; lia.
-  - replace (Z.pow_pos 2 128) with (2^64 * 2^64) by reflexivity.
+  - change (Z.pow_pos 2 128) with (2^64 * 2^64).
     apply Z.mul_lt_mono_nonneg; lia.
 Qed.
 
@@ -65,10 +65,11 @@ Qed.
 Program Definition mul_256 (a b : UInt256) : UInt512 :=
   mkUInt512 (u256_val a * u256_val b) _.
 Next Obligation.
-  destruct a as [av [Ha0 Ha1]], b as [bv [Hb0 Hb1]]. simpl.
+  destruct a as [av [Ha0 Ha1]], b as [bv [Hb0 Hb1]].
+  simpl.
   split.
   - apply Z.mul_nonneg_nonneg; lia.
-  - replace (Z.pow_pos 2 512) with (2^256 * 2^256) by reflexivity.
+  - change (Z.pow_pos 2 512) with (2^256 * 2^256).
     apply Z.mul_lt_mono_nonneg; lia.
 Qed.
 
@@ -102,12 +103,17 @@ Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 Program Definition acc_shift (acc : Acc) : Acc :=
   mkAcc (acc_val acc / 2^64) _.
 Next Obligation.
-  destruct acc as [v [Hv0 Hv1]]. 
+  destruct acc as [v [Hv0 Hv1]].
   simpl.
   split.
   - apply Z.div_pos; lia.
   - apply Z.div_lt_upper_bound; lia.
 Qed.
+
+(** Extract the [i]-th 64-bit limb of a [UInt256] as a [UInt64]. *)
+Program Definition u256_limb (x : UInt256) (i : nat) : UInt64 :=
+  mkUInt64 (limb64 (u256_val x) i) _.
+Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (* ================================================================= *)
 (** ** C representation *)
@@ -144,19 +150,23 @@ Definition uint256_to_val (x : UInt256) : reptype t_secp256k1_uint256 :=
 Program Definition scalar_to_u256 (s : Scalar) : UInt256 :=
   mkUInt256 (scalar_val s) _.
 Next Obligation.
-  destruct s as [v [H0 H1]]; simpl.
-  split; [lia|].
-  unfold secp256k1_N in H1; lia.
+  destruct s as [v [H0 H1]].
+  simpl.
+  split.
+  - lia.
+  - unfold secp256k1_N in H1.
+    lia.
 Qed.
 
-(** [scalar_to_val] and [uint256_to_val ∘ scalar_to_u256] agree. *)
+(** [scalar_to_val] and [uint256_to_val o scalar_to_u256] agree. *)
 Lemma scalar_to_val_eq (s : Scalar) :
   scalar_to_val s = uint256_to_val (scalar_to_u256 s).
 Proof.
-  destruct s as [v Hv]; unfold scalar_to_val, uint256_to_val, scalar_to_u256. 
-  unfold limb64. 
-  simpl (Z.of_nat _). 
-  simpl (_ * _). 
+  destruct s as [v Hv].
+  unfold scalar_to_val, uint256_to_val, scalar_to_u256.
+  unfold limb64.
+  simpl (Z.of_nat _).
+  simpl (_ * _).
   rewrite Z.div_1_r.
   reflexivity.
 Qed.
@@ -190,6 +200,22 @@ Program Definition val_to_acc (c0 c1 c2 : Z)
   : Acc :=
   mkAcc (c0 + c1 * 2^64 + c2 * 2^128) _.
 Next Obligation. nia. Qed.
+
+(* ================================================================= *)
+(** ** Relating [uint256_to_val] to [uint64_to_val] / [u256_limb] *)
+
+(** Each element of [uint256_to_val x] is [uint64_to_val (u256_limb x i)]. *)
+Lemma uint256_to_val_Znth : forall (x : UInt256) (i : Z),
+  0 <= i < 4 ->
+  Znth i (uint256_to_val x) = uint64_to_val (u256_limb x (Z.to_nat i)).
+Proof.
+  intros x i Hi.
+  unfold uint256_to_val, uint64_to_val, u256_limb.
+  simpl.
+  assert (i = 0 \/ i = 1 \/ i = 2 \/ i = 3) by lia.
+  destruct H as [Hi0|[Hi1|[Hi2|Hi3]]].
+  all: subst i; reflexivity.
+Qed.
 
 (* ================================================================= *)
 (** ** u128 function specifications *)

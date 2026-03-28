@@ -33,7 +33,13 @@ Coercion scalar_val : Scalar >-> Z.
 Program Definition scalar_mul (a b : Scalar) : Scalar :=
   mkScalar ((a * b) mod secp256k1_N) _.
 Next Obligation.
-  split; apply Z.mod_pos_bound; unfold secp256k1_N; lia.
+  split.
+  - apply Z.mod_pos_bound.
+    unfold secp256k1_N.
+    lia.
+  - apply Z.mod_pos_bound.
+    unfold secp256k1_N.
+    lia.
 Qed.
 
 (* ================================================================= *)

@@ -1,19 +1,18 @@
-(** * Helper_array_fold: Fold individual [data_at] entries into array [data_at]
-    
+(** * Helper_array_fold: Fold/unfold between element-wise and array [data_at]
+
     When VST's [forward] processes stores into array slots one at a time,
-    the proof state ends up with N separate [data_at sh tulong vi (field_address ...)]
-    predicates. The postcondition requires a single
-    [data_at sh (tarray tulong N) [v0; ...; vN-1] p].
-    
-    These lemmas bridge that gap for arrays of size 2, 4, and 8.
-    
-    Strategy (applied on the RHS of [|--]):
-      1. Split [data_at (tarray tulong N)] into singletons via
-         [split2_data_at_Tarray_app] and [data_at_singleton_array_eq].
-      2. Collapse nested [field_address0] via [field_address0_SUB_SUB].
-      3. Normalize all addresses to [offset_val] via [arr_field_address0]
-         and [arr_field_address].
-      4. [cancel] matches LHS and RHS syntactically. *)
+    the proof state ends up with N separate [data_at sh tulong vi ...]
+    predicates.  The postcondition requires a single
+    [data_at sh (tarray tulong N) [v0; ...; vN-1] p], or vice versa.
+
+    These lemmas bridge that gap in both directions for sizes 2, 4, and 8.
+
+    Strategy (same for fold and unfold):
+      1. Split the array into singletons via [split2_data_at_Tarray_app].
+      2. Simplify subtraction remnants ([change (N-1) with ...]).
+      3. Convert singletons via [data_at_singleton_array_eq].
+      4. Collapse nested [field_address0] via [field_address0_SUB_SUB].
+      5. Normalize addresses to [offset_val] and [cancel]. *)
 
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
@@ -30,7 +29,7 @@ Local Ltac solve_isptr :=
   | H : field_compatible _ _ ?p |- isptr ?p =>
       destruct H as [? _]; destruct p; simpl in *; auto
   end.
-    
+
 
 (** Peel one slot off the front of an uninitialized tulong sub-array
     at index [k] inside [tarray tulong 8].  Preconditions:
@@ -62,6 +61,7 @@ Qed.
 (* ================================================================= *)
 (** ** Size 2 *)
 
+(** Fold 2 individual [data_at] into [data_at (tarray tulong 2)]. *)
 Lemma fold_data_at_tulong_2 :
   forall (sh : share) (p : val) (v0 v1 : val),
   field_compatible (tarray tulong 2) [] p ->
@@ -70,15 +70,18 @@ Lemma fold_data_at_tulong_2 :
   |-- data_at sh (tarray tulong 2) [v0; v1] p.
 Proof.
   intros.
+
   (* Split RHS: [v0; v1] = [v0] ++ [v1] *)
   change [v0; v1] with ([v0] ++ [v1]).
   setoid_rewrite (@split2_data_at_Tarray_app _ 1 2 sh tulong
     [v0] [v1] p eq_refl eq_refl).
   change (2 - 1) with 1.
+
   (* Convert singletons *)
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v0 [v0] p eq_refl).
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v1 [v1]
     (field_address0 (tarray tulong 2) (SUB 1) p) eq_refl).
+
   (* Normalize addresses to offset_val *)
   rewrite !(arr_field_address0 tulong 2 p _ H) by lia.
   rewrite !(arr_field_address tulong 2 p _ H) by lia.
@@ -90,6 +93,7 @@ Qed.
 (* ================================================================= *)
 (** ** Size 4 *)
 
+(** Fold 4 individual [data_at] into [data_at (tarray tulong 4)]. *)
 Lemma fold_data_at_tulong_4 :
   forall (sh : share) (p : val) (v0 v1 v2 v3 : val),
   field_compatible (tarray tulong 4) [] p ->
@@ -100,6 +104,7 @@ Lemma fold_data_at_tulong_4 :
   |-- data_at sh (tarray tulong 4) [v0; v1; v2; v3] p.
 Proof.
   intros.
+
   (* Split RHS: [v0;v1;v2;v3] = [v0] ++ [v1;v2;v3] *)
   change [v0; v1; v2; v3] with ([v0] ++ [v1; v2; v3]).
   setoid_rewrite (@split2_data_at_Tarray_app _ 1 4 sh tulong
@@ -113,8 +118,12 @@ Proof.
     [v2] [v3]
     (field_address0 (tarray tulong 3) (SUB 1)
       (field_address0 (tarray tulong 4) (SUB 1) p)) eq_refl eq_refl).
+
   (* Simplify arithmetic *)
-  change (4 - 1) with 3. change (3 - 1) with 2. change (2 - 1) with 1.
+  change (4 - 1) with 3.
+  change (3 - 1) with 2.
+  change (2 - 1) with 1.
+
   (* Convert singletons *)
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v0 [v0] p eq_refl).
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v1 [v1]
@@ -126,14 +135,18 @@ Proof.
     (field_address0 (tarray tulong 2) (SUB 1)
       (field_address0 (tarray tulong 3) (SUB 1)
         (field_address0 (tarray tulong 4) (SUB 1) p))) eq_refl).
+
   (* Collapse nested field_address0 *)
   rewrite !field_address0_SUB_SUB by lia.
-  change (1 + 1) with 2. change (1 + (1 + 1)) with 3.
+  change (1 + 1) with 2.
+  change (1 + (1 + 1)) with 3.
+
   (* Normalize addresses to offset_val *)
   rewrite !(arr_field_address0 tulong 4 p _ H) by lia.
   rewrite !(arr_field_address tulong 4 p _ H) by lia.
   simpl (sizeof tulong * _).
   rewrite isptr_offset_val_zero by solve_isptr.
+
   cancel.
 Qed.
 
@@ -152,6 +165,7 @@ Lemma unfold_data_at__tulong_4 :
 (* ================================================================= *)
 (** ** Size 8 *)
 
+(** Fold 8 individual [data_at] into [data_at (tarray tulong 8)]. *)
 Lemma fold_data_at_tulong_8 :
   forall (sh : share) (p : val) (v0 v1 v2 v3 v4 v5 v6 v7 : val),
   field_compatible (tarray tulong 8) [] p ->
@@ -166,6 +180,7 @@ Lemma fold_data_at_tulong_8 :
   |-- data_at sh (tarray tulong 8) [v0; v1; v2; v3; v4; v5; v6; v7] p.
 Proof.
   intros.
+
   (* --- Phase 1: Split the 8-element array into singletons --- *)
   change [v0; v1; v2; v3; v4; v5; v6; v7]
     with ([v0] ++ [v1; v2; v3; v4; v5; v6; v7]).
@@ -216,8 +231,12 @@ Proof.
               (field_address0 (tarray tulong 8) (SUB 1) p)))))) eq_refl eq_refl).
 
   (* --- Phase 2: Simplify subtraction remnants --- *)
-  change (8-1) with 7. change (7-1) with 6. change (6-1) with 5.
-  change (5-1) with 4. change (4-1) with 3. change (3-1) with 2.
+  change (8-1) with 7.
+  change (7-1) with 6.
+  change (6-1) with 5.
+  change (5-1) with 4.
+  change (4-1) with 3.
+  change (3-1) with 2.
   change (2-1) with 1.
 
   (* --- Phase 3: Convert all singleton arrays to plain data_at --- *)
@@ -276,8 +295,7 @@ Proof.
   cancel.
 Qed.
 
-(** Reverse of [fold_data_at_tulong_8]: decompose an 8-element array
-    into individual [data_at] at each index. *)
+(** Unfold [data_at (tarray tulong 8)] into 8 individual [data_at]. *)
 Lemma unfold_data_at_tulong_8 :
   forall (sh : share) (p : val) (v0 v1 v2 v3 v4 v5 v6 v7 : val),
   field_compatible (tarray tulong 8) [] p ->
@@ -292,6 +310,8 @@ Lemma unfold_data_at_tulong_8 :
       data_at sh tulong v7 (field_address (tarray tulong 8) (SUB 7) p).
 Proof.
   intros sh p v0 v1 v2 v3 v4 v5 v6 v7 H.
+
+  (* --- Phase 1: Split the 8-element array into singletons --- *)
   change [v0; v1; v2; v3; v4; v5; v6; v7]
     with ([v0] ++ [v1; v2; v3; v4; v5; v6; v7]).
   setoid_rewrite (@split2_data_at_Tarray_app _ 1 8 sh tulong
@@ -339,9 +359,17 @@ Proof.
           (field_address0 (tarray tulong 6) (SUB 1)
             (field_address0 (tarray tulong 7) (SUB 1)
               (field_address0 (tarray tulong 8) (SUB 1) p)))))) eq_refl eq_refl).
-  change (8-1) with 7. change (7-1) with 6. change (6-1) with 5.
-  change (5-1) with 4. change (4-1) with 3. change (3-1) with 2.
+
+  (* --- Phase 2: Simplify subtraction remnants --- *)
+  change (8-1) with 7.
+  change (7-1) with 6.
+  change (6-1) with 5.
+  change (5-1) with 4.
+  change (4-1) with 3.
+  change (3-1) with 2.
   change (2-1) with 1.
+
+  (* --- Phase 3: Convert all singleton arrays to plain data_at --- *)
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v0 [v0] p eq_refl).
   setoid_rewrite (@data_at_singleton_array_eq _ sh tulong v1 [v1]
     (field_address0 (tarray tulong 8) (SUB 1) p) eq_refl).
@@ -378,6 +406,8 @@ Proof.
             (field_address0 (tarray tulong 6) (SUB 1)
               (field_address0 (tarray tulong 7) (SUB 1)
                 (field_address0 (tarray tulong 8) (SUB 1) p))))))) eq_refl).
+
+  (* --- Phase 4: Collapse nested field_address0 --- *)
   rewrite !field_address0_SUB_SUB by lia.
   change (1 + 1) with 2.
   change (1 + (1 + 1)) with 3.
@@ -385,6 +415,8 @@ Proof.
   change (1 + (1 + (1 + (1 + 1)))) with 5.
   change (1 + (1 + (1 + (1 + (1 + 1))))) with 6.
   change (1 + (1 + (1 + (1 + (1 + (1 + 1)))))) with 7.
+
+  (* --- Phase 5: Normalize all addresses to offset_val --- *)
   rewrite !(arr_field_address0 tulong 8 p _ H) by lia.
   rewrite !(arr_field_address tulong 8 p _ H) by lia.
   simpl (sizeof tulong * _).

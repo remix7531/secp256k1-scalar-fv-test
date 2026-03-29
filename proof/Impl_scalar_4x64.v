@@ -486,21 +486,19 @@ Definition secp256k1_scalar_check_overflow_spec : ident * funspec :=
     Returns [overflow] unchanged.
 
     The C code simply ripple-adds [overflow * N_C_i] across the four
-    limbs; it does NOT test for or subtract N itself.  Callers are
-    responsible for choosing the right [overflow] so that the result
-    is in range (see [secp256k1_scalar_reduce_512]). *)
+    limbs, discarding the final carry; the result is
+    [(r + overflow * (2^256 - N)) mod 2^256]. *)
 Definition secp256k1_scalar_reduce_spec : ident * funspec :=
   DECLARE _secp256k1_scalar_reduce
   WITH r_ptr : val, r : UInt256, overflow : Z, sh : share
   PRE [ tptr t_secp256k1_uint256, tuint ]
     PROP (writable_share sh;
-          0 <= overflow <= 2;
-          0 <= Z.add (u256_val r) (Z.mul overflow (Z.sub (2^256) secp256k1_N)) < 2^256)
+          0 <= overflow <= 2)
     PARAMS (r_ptr; Vint (Int.repr overflow))
     SEP (data_at sh t_secp256k1_uint256 (uint256_to_val r) r_ptr)
   POST [ tint ]
     EX r' : UInt256,
-    PROP (u256_val r' = Z.add (u256_val r) (Z.mul overflow (Z.sub (2^256) secp256k1_N)))
+    PROP (u256_val r' = (Z.add (u256_val r) (Z.mul overflow (Z.sub (2^256) secp256k1_N))) mod 2^256)
     RETURN (Vint (Int.repr overflow))
     SEP (data_at sh t_secp256k1_uint256 (uint256_to_val r') r_ptr).
 

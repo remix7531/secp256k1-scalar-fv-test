@@ -1925,7 +1925,6 @@ Proof.
 
   rename SH into Hsh_writable.
   rename H into Hov_range.       (* 0 <= overflow <= 2 *)
-  rename H0 into Hresult_range.  (* 0 <= r + overflow*(2^256-N) < 2^256 *)
 
   (* --- Setup: name the four 64-bit limbs of r --- *)
   set (d0 := limb64 (u256_val r) 0).
@@ -2102,9 +2101,9 @@ Proof.
 
   (* ===== Postcondition ===== *)
 
-  set (result_val := u256_val r + overflow * (2^256 - secp256k1_N)).
+  set (result_val := (u256_val r + overflow * (2^256 - secp256k1_N)) mod 2^256).
   assert (Hresult_range' : 0 <= result_val < 2^256)
-    by (subst result_val; exact Hresult_range).
+    by (subst result_val; apply Z.mod_pos_bound; lia).
 
   Exists (mkUInt256 result_val Hresult_range').
   entailer!.
@@ -2151,7 +2150,11 @@ Proof.
   { intros [-> [-> [-> ->]]].
     reflexivity. }
 
-  clear - r overflow Hov_range Hresult_range
+  assert (Hchain_bound :
+    0 <= u256_val r + overflow * (2^256 - secp256k1_N) < 2 * 2^256).
+  { pose proof (u256_range r). unfold secp256k1_N. lia. }
+
+  clear - r overflow Hov_range Hchain_bound
           d0 d1 d2 d3 Hd0 Hd1 Hd2 Hd3
           t0 t1 t2 t3 result_val Hresult_range'.
 
@@ -2188,21 +2191,21 @@ Proof.
   rewrite <- HdecompB in Hchain_raw.
   set (C := N_C_0 + N_C_1 * B + N_C_2 * (B * B)) in *.
   assert (HC_eq : C = 2^256 - secp256k1_N) by (subst C B; rewrite secp256k1_N_C_limbs; ring).
-  destruct (Hchain_raw ltac:(rewrite HC_eq; subst B; lia)) as (Hchain_eq & _ & Hhi_bnd).
+  destruct (Hchain_raw ltac:(rewrite HC_eq; subst B; lia))
+    as (Hchain_eq & Hr_z_bnd & Hhi_bnd).
 
-  (* hi = 0 because result < B^4 *)
-  assert (Hhi0 : t3 / B = 0) by lia.
-  rewrite Hhi0 in Hchain_eq.
-  simpl (0 * _) in Hchain_eq.
-  rewrite Z.add_0_r in Hchain_eq.
-  rename Hchain_eq into Hchain.
-  clear Hchain_raw Hhi_bnd Hhi0.
-
-  (* Connect result_val to the chain *)
-  assert (Hresult_eq : result_val = u256_val r + overflow * C)
-    by (subst result_val; rewrite HC_eq; ring).
-  rewrite Hresult_eq.
-  clear Hresult_eq HC_eq result_val Hresult_range'.
+  (* r_z = result_val via carry chain + mod *)
+  set (r_z := (t0 mod B) + (t1 mod B) * B
+            + (t2 mod B) * (B * B) + (t3 mod B) * (B * B * B)) in *.
+  assert (Hchain : result_val = r_z).
+  { subst result_val.
+    rewrite <- HC_eq, <- Hchain_eq.
+    replace (B * B * B * B) with (2^256) by (subst B; ring).
+    rewrite Z_mod_plus_full.
+    apply Z.mod_small. subst B. lia. }
+  rewrite Hchain.
+  clear Hchain Hchain_eq Hr_z_bnd Hhi_bnd Hchain_raw
+        HC_eq result_val Hresult_range' Hchain_bound.
 
   (* Extract individual limbs via limbs_eval4 *)
   pose proof (limbs_eval4 B (t0 mod B) (t1 mod B) (t2 mod B) (t3 mod B)
@@ -2214,7 +2217,6 @@ Proof.
   unfold eval4 in Hl0, Hl1, Hl2, Hl3.
   replace (B^2) with (B * B) in Hl0, Hl1, Hl2, Hl3 by ring.
   replace (B^3) with (B * B * B) in Hl0, Hl1, Hl2, Hl3 by ring.
-  rewrite Hchain in Hl0, Hl1, Hl2, Hl3.
   clear - Hl0 Hl1 Hl2 Hl3.
 
   exact (conj (eq_sym Hl0) (conj (eq_sym Hl1) (conj (eq_sym Hl2) (eq_sym Hl3)))).
@@ -3583,7 +3585,8 @@ Proof.
      Chain: reduce_carry_chain gives Stage 3 carry identity,
             cond_sub_mod handles the conditional subtraction,
             fold_sub_mod + Hstage2_mod connect back to u512_val l. *)
-  assert (Hmod_eq : r_z + ov * (2^256 - secp256k1_N) = u512_val l mod secp256k1_N).
+  assert (Hmod_eq :
+    (r_z + ov * (2^256 - secp256k1_N)) mod 2^256 = u512_val l mod secp256k1_N).
   {
     (* lo_i = c_i mod 2^64, hi = c3 / 2^64 *)
     assert (Hlo0_eq : u64_val lo0 = u128_val c128_0a mod 2^64)
@@ -3650,20 +3653,41 @@ Proof.
     change (2^128 * 2^64 * 2^64) with (2^256) in *.
     change (2^192 * 2^64) with (2^256) in *.
 
-    (* r_z + ov*(2^256-N) = (p_val + p4*N_C) mod N *)
-    pose proof (cond_sub_mod _ _ _ secp256k1_N
+    (* cond_sub_mod: val mod N = val - ov * N *)
+    pose proof (cond_sub_mod (2^256) _ _ _ secp256k1_N
       ltac:(unfold secp256k1_N; lia)
       ltac:(unfold secp256k1_N; lia)
-      Hr_z_bnd Hhi_bnd Hchain) as Hcond.
+      Hr_z_bnd Hhi_bnd (eq_sym Hchain)
+      ltac:(intro; unfold secp256k1_N, N_C_0, N_C_1 in *; lia)) as Hcond.
 
-    (* (p_val + p4*N_C) mod N = (p_val + p4*2^256) mod N = u512_val l mod N *)
-    rewrite Hcond.
-    replace (N_C_0 + N_C_1 * 2^64 + 1 * 2^128)
-      with (2^256 - secp256k1_N)
-      by (unfold secp256k1_N, N_C_0, N_C_1; lia).
-    rewrite fold_sub_mod.
+    (* fold_sub_mod: val mod N = u512_val l mod N *)
+    assert (Hmod_val :
+      (u64_val p0_u64 + u64_val p1_u64 * 2 ^ 64
+       + u64_val p2_u64 * 2 ^ 128 + u64_val p3_u64 * 2 ^ 192
+       + p4_val * (N_C_0 + N_C_1 * 2 ^ 64 + 1 * 2 ^ 128))
+      mod secp256k1_N = u512_val l mod secp256k1_N).
+    { replace (N_C_0 + N_C_1 * 2^64 + 1 * 2^128)
+        with (2^256 - secp256k1_N)
+        by (unfold secp256k1_N, N_C_0, N_C_1; lia).
+      rewrite fold_sub_mod.
+      exact Hstage2_mod. }
 
-    exact Hstage2_mod.
+    (* Derive: (r_z + ov*C) mod 2^256 = u512_val l mod N *)
+    assert (Hmod_algebra : forall r h o N0 A : Z,
+      0 <= (r + h * A) - o * N0 < A ->
+      (r + o * (A - N0)) mod A = (r + h * A) - o * N0).
+    { intros r0 h o N0 A ?.
+      replace (r0 + o * (A - N0)) with ((r0 + h * A - o * N0) + (o - h) * A)
+        by lia.
+      rewrite Z_mod_plus_full. apply Z.mod_small. assumption. }
+    rewrite <- Hmod_val, Hcond, <- Hchain.
+    apply Hmod_algebra.
+    rewrite Hchain, <- Hcond.
+    split.
+    + apply Z.mod_pos_bound. unfold secp256k1_N; lia.
+    + eapply Z.lt_trans.
+      * apply Z.mod_pos_bound. unfold secp256k1_N; lia.
+      * unfold secp256k1_N; lia.
   }
 
   forward_call (r_ptr, r_u256, ov, sh_r).
@@ -3678,7 +3702,7 @@ Proof.
     do 2 f_equal.
     destruct (Z_lt_dec r_z secp256k1_N);
     rewrite Int.signed_repr by rep_lia; reflexivity. }
-  { (* 0 <= ov <= 2 /\ 0 <= r_z + ov*(2^256-N) < 2^256 *)
+  { (* 0 <= ov <= 2 *)
     change Int.max_unsigned with 4294967295 in Hp4_u32.
     assert (HNC0p4 : N_C_0 * p4_val <= N_C_0 * 4294967295)
       by (apply Z.mul_le_mono_nonneg_l; [unfold N_C_0; lia | lia]).
@@ -3706,16 +3730,10 @@ Proof.
     { rewrite Hhi, u128_hi_val, Hc128_3_val.
       pose proof (u64_range p3_u64).
       apply Z.div_le_upper_bound; lia. }
-    split.
-    - unfold ov.
-      simpl u256_val.
-      pose proof (u64_range hi).
-      destruct (Z_lt_dec r_z secp256k1_N); lia.
-    - simpl u256_val.
-      rewrite Hmod_eq.
-      pose proof (Z.mod_pos_bound (u512_val l) secp256k1_N ltac:(unfold secp256k1_N; lia)).
-      unfold secp256k1_N in *.
-      lia. }
+    unfold ov.
+    simpl u256_val.
+    pose proof (u64_range hi).
+    destruct (Z_lt_dec r_z secp256k1_N); lia. }
 
   (* ===== Cleanup: provide witness and strip VST machinery ===== *)
 

@@ -821,14 +821,43 @@ Proof.
   reflexivity.
 Qed.
 
-(** Conditional subtraction: given a value [r + hi * 2^256] with
-    [0 <= r < 2^256] and [0 <= hi <= 1], compute [val mod N] by
-    subtracting at most 2 copies of [N]. *)
-Lemma cond_sub_mod : forall r hi val N,
-  N > 2^255 -> 2^256 - N < N ->
-  0 <= r < 2^256 -> 0 <= hi <= 1 ->
-  r + hi * 2^256 = val ->
-  r + (hi + (if Z_lt_dec r N then 0 else 1)) * (2^256 - N)
-  = val mod N.
+(** Conditional subtraction (version B): subtract multiples of N.
+    Equivalent formulation: [val - k * N = val mod N] where
+    [k = hi + overflow].  No [mod B] needed. *)
+Lemma cond_sub_mod : forall B r hi val N,
+  N < B ->
+  B - N < N ->
+  0 <= r < B ->
+  0 <= hi <= 1 ->
+  val = r + hi * B ->
+  (hi = 1 -> r + (B - N) < N) ->
+  val mod N = val - (hi + (if Z_lt_dec r N then 0 else 1)) * N.
 Proof.
-Admitted.
+  intros B r hi val N HNB HBN Hr Hhi Hval Hhi1.
+  subst val.
+  assert (Hhi_cases : hi = 0 \/ hi = 1) by lia.
+  destruct (Z_lt_dec r N) as [Hlt | Hge];
+    destruct Hhi_cases as [Hhi0 | Hhi1'];
+    subst hi.
+  - (* r < N, hi = 0 *)
+    simpl.
+    rewrite Z.sub_0_r.
+    apply Z.mod_small.
+    lia.
+  - (* r < N, hi = 1 *)
+    specialize (Hhi1 eq_refl).
+    replace (r + 1 * B) with ((r + (B - N)) + 1 * N) by lia.
+    rewrite Z_mod_plus_full.
+    rewrite Z.mod_small by lia.
+    lia.
+  - (* r >= N, hi = 0 *)
+    assert (Hge' : N <= r) by lia.
+    replace ((r + 0 * B) mod N) with ((r - N + 1 * N) mod N)
+      by (f_equal; lia).
+    rewrite Z_mod_plus_full.
+    rewrite Z.mod_small by lia.
+    destruct N; lia.
+  - (* r >= N, hi = 1 *)
+    specialize (Hhi1 eq_refl).
+    lia.
+Qed.

@@ -5,8 +5,7 @@
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
-Require Import VST.floyd.proofauto.
-Require Import scalar_4x64.Source_scalar_4x64.
+Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Spec_scalar_4x64.
 
 (* ================================================================= *)
@@ -117,10 +116,6 @@ Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (* ================================================================= *)
 (** ** C representation *)
-
-Definition t_secp256k1_uint128 : type := Tstruct __191 noattr.
-Definition t_secp256k1_uint256 : type := Tstruct __185 noattr.
-Definition t_secp256k1_acc : type := Tstruct __215 noattr.
 
 (** Represent a [UInt64] as a C value. *)
 Definition uint64_to_val (x : UInt64) : val :=

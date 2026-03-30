@@ -7,10 +7,7 @@
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
-Require Import VST.floyd.proofauto.
-Require Import scalar_4x64.Source_scalar_4x64.
-#[export] Instance CompSpecs : compspecs. make_compspecs prog. Defined.
-Definition Vprog : varspecs. mk_varspecs prog. Defined.
+Require Import scalar_4x64.Verif_imports.
 
 (* ================================================================= *)
 (** ** Types *)
@@ -33,19 +30,11 @@ Coercion scalar_val : Scalar >-> Z.
 Program Definition scalar_mul (a b : Scalar) : Scalar :=
   mkScalar ((a * b) mod secp256k1_N) _.
 Next Obligation.
-  split.
-  - apply Z.mod_pos_bound.
-    unfold secp256k1_N.
-    lia.
-  - apply Z.mod_pos_bound.
-    unfold secp256k1_N.
-    lia.
+  split; apply Z.mod_pos_bound; unfold secp256k1_N; lia.
 Qed.
 
 (* ================================================================= *)
 (** ** C representation *)
-
-Definition t_secp256k1_scalar : type := Tstruct __185 noattr.
 
 (** Represent a [Scalar] as a 4-limb C scalar struct.
     Each limb is [(x / 2^(64*i)) mod 2^64]. *)

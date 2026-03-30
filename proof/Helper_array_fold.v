@@ -17,9 +17,7 @@
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
-Require Import VST.floyd.proofauto.
-Require Import scalar_4x64.Source_scalar_4x64.
-Require Import scalar_4x64.Spec_scalar_4x64.
+Require Import scalar_4x64.Verif_imports.
 
 (* ================================================================= *)
 (** ** Helper: [isptr] from [field_compatible] *)

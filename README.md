@@ -59,7 +59,7 @@ struct of two `uint64_t` limbs, matching the upstream fallback path.
 
 The development environment can be set up with any of:
 
-- **Nix** (recommended): `nix develop` provides Rocq 9.0, VST, CompCert, and all dependencies.
+- **Nix** (recommended): `nix develop` (or `nix-shell`) provides Rocq 9.0, VST, CompCert, and all dependencies.
 - **Dev Container**: open in VS Code with the Dev Containers extension or use `devcontainer up`.
 - **[opam](https://opam.ocaml.org/)** (manual):
 

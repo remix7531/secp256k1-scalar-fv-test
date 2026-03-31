@@ -72,7 +72,7 @@ Proof.
       unfold Int64.eqm.
       apply Zbits.eqmod_refl.
     * (* Conclude via limb_add_1 *)
-      apply limb_add_1; lia.
+      apply eqm_of_mod_eq. apply limb_add_1; lia.
   + (* limb 2: acc + a < 2^128 so both sides are 0 *)
     f_equal.
     apply Int64.eqm_samerepr.

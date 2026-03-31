@@ -94,7 +94,7 @@ Proof.
       exists 0.
       lia.
     * (* Conclude via limb_add_1 *)
-      unfold Int64.eqm.
+      apply eqm_of_mod_eq. 
       apply limb_add_1; lia.
   + (* limb 2: two levels of carry -> limb_add_2_u64 *)
     f_equal.
@@ -127,5 +127,6 @@ Proof.
 
     (* Conclude via limb_add_2_u64 *)
     subst carry0 carry1.
+    apply eqm_of_mod_eq.
     apply limb_add_2_u64; lia.
 Qed.

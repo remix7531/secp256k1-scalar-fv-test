@@ -214,36 +214,46 @@ Qed.
 (* ----------------------------------------------------------------- *)
 (** *** Limb-wise addition *)
 
-(** Limb 0: sum of low limbs = low limb of sum (mod 2^64).
-    No incoming carry for the lowest digit. *)
-Lemma limb_add_0 : forall a b,
-  0 <= a -> 0 <= b ->
-  Int64.eqm (limb64 a 0 + limb64 b 0)
-             (limb64 (a + b) 0).
+(** Bridge: [x mod 2^64 = y] implies [Int64.eqm x y]. *)
+Lemma eqm_of_mod_eq : forall x y,
+  x mod 2^64 = y -> Int64.eqm x y.
 Proof.
-  intros.
-  unfold limb64, Int64.eqm.
+  intros x y H.
+  unfold Int64.eqm.
   change Int64.modulus with (2^64).
-  simpl Z.of_nat.
-  rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r.
-  rewrite Z.add_mod by lia.
+  rewrite <- H.
   apply Zbits.eqmod_mod.
   lia.
 Qed.
 
-(** Limb 1: sum of middle limbs + carry-in = middle limb of sum (mod 2^64). *)
+(** Limb 0: sum of low limbs mod 2^64 = low limb of sum.
+    No incoming carry for the lowest digit. *)
+Lemma limb_add_0 : forall a b,
+  0 <= a -> 0 <= b ->
+  (limb64 a 0 + limb64 b 0) mod 2^64 = limb64 (a + b) 0.
+Proof.
+  intros.
+  unfold limb64.
+  simpl Z.of_nat.
+  rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r.
+  rewrite Z.add_mod by lia.
+  rewrite Z.mod_mod by lia.
+  rewrite Z.mod_mod by lia.
+  rewrite <- Z.add_mod by lia.
+  reflexivity.
+Qed.
+
+(** Limb 1: sum of middle limbs + carry-in mod 2^64 = middle limb of sum. *)
 Lemma limb_add_1 : forall a b,
   0 <= a -> 0 <= b ->
-  Int64.eqm (limb64 a 1 + (limb64 b 1 +
-               (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1)))
-             (limb64 (a + b) 1).
+  (limb64 a 1 + (limb64 b 1 +
+    (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1))) mod 2^64
+  = limb64 (a + b) 1.
 Proof.
   intros.
   unfold limb64.
   simpl Z.of_nat.
   rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r, Z.mul_1_r.
-  unfold Int64.eqm.
-  change Int64.modulus with (2^64).
 
   (* Decompose (a+b)/2^64 via carry identity *)
   replace ((a + b) / 2^64)
@@ -251,39 +261,25 @@ Proof.
     by (symmetry; apply Z_div_add_carry; lia).
   rewrite carry_value by lia.
 
-  (* Transitivity through the div/mod form *)
-  apply Zbits.eqmod_trans
-    with (y := a / 2^64 + b / 2^64 +
-               (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1)).
-  - (* LHS eqmod intermediate: unfold limbs into div/mod *)
-    replace (a / 2^64 + b / 2^64 +
-               (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1))
-      with (a / 2^64 + (b / 2^64 +
-               (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1)))
-      by lia.
-    apply Zbits.eqmod_add.
-    + (* limb64 a 1 eqmod a / 2^64 *)
-      apply Zbits.eqmod_sym.
-      apply Zbits.eqmod_mod.
-      lia.
-    + (* limb64 b 1 + carry eqmod b/2^64 + carry *)
-      apply Zbits.eqmod_add.
-      * apply Zbits.eqmod_sym.
-        apply Zbits.eqmod_mod.
-        lia.
-      * apply Zbits.eqmod_refl.
-  - (* intermediate eqmod RHS: fold back to (a+b)/2^64 mod 2^64 *)
-    apply Zbits.eqmod_mod.
-    lia.
+  (* Strip inner mods through the outer mod *)
+  rewrite Zplus_mod_idemp_l.
+  replace (a / 2^64 + ((b / 2^64) mod 2^64 +
+    (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1)))
+    with ((a / 2^64 +
+    (if a mod 2^64 + b mod 2^64 <? 2^64 then 0 else 1)) +
+    (b / 2^64) mod 2^64) by lia.
+  rewrite Zplus_mod_idemp_r.
+  f_equal.
+  lia.
 Qed.
 
-(** Limb 2: sum of high limbs + carry-in = high limb of sum (mod 2^64).
+(** Limb 2: sum of high limbs + carry-in mod 2^64 = high limb of sum.
     Requires [b < 2^128] (i.e. b fits in 2 limbs) so that [b/(M*M) = 0]. *)
 Lemma limb_add_2 : forall a b,
   0 <= a -> 0 <= b -> b < 2^128 ->
-  Int64.eqm (limb64 a 2 + (if limb64 a 1 + limb64 b 1 +
-               (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1) <? 2^64 then 0 else 1))
-             (limb64 (a + b) 2).
+  (limb64 a 2 + (if limb64 a 1 + limb64 b 1 +
+    (if limb64 a 0 + limb64 b 0 <? 2^64 then 0 else 1) <? 2^64 then 0 else 1))
+  mod 2^64 = limb64 (a + b) 2.
 Proof.
   intros a b Ha Hb Hb128.
 
@@ -294,8 +290,6 @@ Proof.
   replace (64 * 2) with (64 + 64) by lia.
   rewrite Z.pow_add_r by lia.
   set (M := (2^64)%Z).
-  unfold Int64.eqm.
-  replace Int64.modulus with M by (unfold M; reflexivity).
 
   (* b < M^2, so b / (M*M) = 0 *)
   assert (Hbdiv : b / (M * M) = 0).
@@ -385,25 +379,17 @@ Proof.
           with (r := la0 + lb0 - M + (la1 + lb1 + 1 - M) * M); lia. }
   rewrite Hcarry_val.
 
-  (* Transitivity: LHS eqmod a/(M*M) + carry2 eqmod RHS *)
-  apply Zbits.eqmod_trans with (y := a / (M * M) + carry2).
-  - (* limb64 a 2 eqmod a/(M*M) *)
-    apply Zbits.eqmod_add.
-    + apply Zbits.eqmod_sym.
-      apply Zbits.eqmod_mod.
-      lia.
-    + apply Zbits.eqmod_refl.
-  - (* a/(M*M) + carry2 eqmod (a+b)/(M*M) mod M *)
-    apply Zbits.eqmod_mod.
-    lia.
+  (* Final step: strip inner mod through outer mod *)
+  rewrite Zplus_mod_idemp_l.
+  reflexivity.
 Qed.
 
 (** Limb 2 for addition with a u64: [b < 2^64] so [limb64 b 1 = 0]. *)
 Lemma limb_add_2_u64 : forall a b,
   0 <= a -> 0 <= b < 2^64 ->
-  Int64.eqm (limb64 a 2 +
+  (limb64 a 2 +
     (if limb64 a 1 + (if limb64 a 0 + b <? 2^64 then 0 else 1) <? 2^64 then 0 else 1))
-    (limb64 (a + b) 2).
+  mod 2^64 = limb64 (a + b) 2.
 Proof.
   intros a b Ha [Hb0 Hb1].
 
@@ -414,8 +400,6 @@ Proof.
   replace (64 * 2) with (64 + 64) by lia.
   rewrite Z.pow_add_r by lia.
   set (M := (2^64)%Z).
-  unfold Int64.eqm.
-  replace Int64.modulus with M by (unfold M; reflexivity).
 
   (* b < M, so b / (M*M) = 0 and b mod (M*M) = b *)
   assert (Hbdiv : b / (M * M) = 0) by (apply Z.div_small; unfold M; lia).
@@ -471,18 +455,9 @@ Proof.
           with (r := la0 + la1 * M + b - M * M); lia. }
   rewrite Hcarry_val.
 
-  (* Transitivity: LHS eqmod a/(M*M) + carry eqmod RHS *)
-  apply Zbits.eqmod_trans
-    with (y := a / (M * M) + (if la1 + carry0 <? M then 0 else 1)).
-  - (* limb64 a 2 eqmod a/(M*M) *)
-    apply Zbits.eqmod_add.
-    + apply Zbits.eqmod_sym.
-      apply Zbits.eqmod_mod.
-      lia.
-    + apply Zbits.eqmod_refl.
-  - (* a/(M*M) + carry eqmod (a+b)/(M*M) mod M *)
-    apply Zbits.eqmod_mod.
-    lia.
+  (* Final step: strip inner mod through outer mod *)
+  rewrite Zplus_mod_idemp_l.
+  reflexivity.
 Qed.
 
 (* ----------------------------------------------------------------- *)
@@ -556,6 +531,7 @@ Proof.
 
   (* Conclude via limb_add_1 *)
   change Int64.modulus with (2^64).
+  apply eqm_of_mod_eq.
   apply limb_add_1; lia.
 Qed.
 
@@ -651,5 +627,6 @@ Proof.
 
   (* Conclude via limb_add_2 *)
   subst c0'.
+  apply eqm_of_mod_eq.
   apply limb_add_2; nia.
 Qed.

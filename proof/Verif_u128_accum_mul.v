@@ -56,6 +56,7 @@ Proof.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
+    apply eqm_of_mod_eq. 
     apply limb_add_0.
     - destruct r; simpl; lia.
     - apply Z.mul_nonneg_nonneg; destruct a, b; simpl; lia.

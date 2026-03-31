@@ -53,6 +53,7 @@ Proof.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
+    apply eqm_of_mod_eq.
     apply limb_add_0; lia.
   + (* limb 1 *)
     f_equal.

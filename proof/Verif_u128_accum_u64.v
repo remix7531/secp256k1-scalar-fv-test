@@ -44,7 +44,8 @@ Proof.
     apply Int64.eqm_trans with (y := limb64 (u128_val r) 0 + limb64 (u64_val a) 0).
     + rewrite limb64_u64_val_0.
       apply Int64.eqm_refl.
-    + apply limb_add_0; lia.
+    + apply eqm_of_mod_eq.
+      apply limb_add_0; lia.
   - (* hi limb *)
     apply Int64.eqm_samerepr.
     pose proof (u128_range r) as Hr.
@@ -60,5 +61,6 @@ Proof.
     + rewrite limb64_u64_val_0, limb64_u64_val_1.
       unfold Int64.eqm.
       apply Zbits.eqmod_refl.
-    + apply limb_add_1; lia.
+    + apply eqm_of_mod_eq.
+      apply limb_add_1; lia.
 Qed.

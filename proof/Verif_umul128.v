@@ -38,167 +38,93 @@ Qed.
 
 (* ----------------------------------------------------------------- *)
 
-(** The schoolbook multiplication low-half identity (modular form):
-    ((mid34 << 32) + (uint32_t)ll) mod 2^64  =  (a * b) mod 2^64
-    where mid34 = ll>>32 + (uint32_t)lh + (uint32_t)hl *)
-Lemma umul128_lo_correct : forall a b,
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  let M := Int.modulus in
-  let a_lo := a mod M in
-  let a_hi := a / M in
-  let b_lo := b mod M in
-  let b_hi := b / M in
-  let mid34 := a_lo * b_lo / M + (a_lo * b_hi) mod M + (a_hi * b_lo) mod M in
-  (mid34 * M + (a_lo * b_lo) mod M) mod (M * M) = (a * b) mod (M * M).
+(** The mid-accumulator variant of 2x2 schoolbook multiplication.
+    Given limbs [a0, a1, b0, b1] in [[0, B)], the C code computes:
+    - [mid := ll / B + lh mod B + hl mod B]
+    - [lo  := mid * B + ll mod B]
+    - [hi  := hh + lh / B + hl / B + mid / B]
+
+    This lemma connects these computations to [eval2] and proves
+    [lo mod B^2 = product mod B^2] and [hi = product / B^2]. *)
+Lemma schoolbook_mul_2x2_mid :
+  forall B,
+  B > 1 ->
+  forall a0 a1 b0 b1,
+  0 <= a0 < B -> 0 <= a1 < B ->
+  0 <= b0 < B -> 0 <= b1 < B ->
+  let mid := a0 * b0 / B + (a0 * b1) mod B + (a1 * b0) mod B in
+  let lo := mid * B + (a0 * b0) mod B in
+  let hi := a1 * b1 + a0 * b1 / B + a1 * b0 / B + mid / B in
+  let product := eval2 B a0 a1 * eval2 B b0 b1 in
+  lo mod (B * B) = product mod (B * B) /\
+  hi = product / (B * B).
 Proof.
-  intros a b Ha Hb.
-  cbv zeta.
+  intros B HB a0 a1 b0 b1 Ha0 Ha1 Hb0 Hb1 mid lo hi product.
+  assert (HB_pos : 0 < B) by lia.
+  assert (Hprod : product = a0*b0 + (a0*b1 + a1*b0)*B + a1*b1*B*B)
+    by (subst product; unfold eval2; ring).
+  set (acc1 := a0*b0/B + a0*b1 + a1*b0).
 
-  set (M := Int.modulus).
-  set (al := a mod M).
-  set (ah := a / M).
-  set (bl := b mod M).
-  set (bh := b / M).
-  set (ll := al * bl).
-  set (lh := al * bh).
-  set (hl := ah * bl).
-  set (hh := ah * bh).
-  fold al bl ah bh ll lh hl.
+  (* Get digit equalities from schoolbook_mul_2x2 *)
+  pose proof (schoolbook_mul_2x2 B HB a0 a1 b0 b1 Ha0 Ha1 Hb0 Hb1
+    (a0*b0) eq_refl (a0*b0/B) eq_refl
+    acc1 ltac:(subst acc1; reflexivity)
+    (acc1/B) eq_refl
+    (acc1/B + a1*b1) eq_refl
+    ((acc1/B + a1*b1)/B) eq_refl) as Hmul.
+  cbv zeta in Hmul.
+  fold product in Hmul.
+  destruct Hmul as (Hr0 & Hr1 & _ & _).
 
-  (* --- Setup --- *)
-  assert (HM : 0 < M) by (subst M; rep_lia).
-  assert (Ha_eq : a = ah * M + al) by (subst ah al; apply div_mod_eq; lia).
-  assert (Hb_eq : b = bh * M + bl) by (subst bh bl; apply div_mod_eq; lia).
-  assert (Hlh_eq : lh = lh / M * M + lh mod M) by (apply div_mod_eq; lia).
-  assert (Hhl_eq : hl = hl / M * M + hl mod M) by (apply div_mod_eq; lia).
-  assert (Hll_eq : ll = ll / M * M + ll mod M) by (apply div_mod_eq; lia).
+  split.
 
-  (* --- Main algebraic argument --- *)
+  (* --- lo mod B^2 = product mod B^2 --- *)
+  { subst lo.
+    (* Decompose mid = mid/B * B + mid mod B, cancel mid/B * B^2 *)
+    rewrite (Z_div_mod_eq_full mid B) at 1.
+    replace ((B * (mid / B) + mid mod B) * B + (a0 * b0) mod B)
+      with ((a0 * b0) mod B + mid mod B * B + mid / B * (B * B)) by ring.
+    rewrite Z_mod_plus_full.
 
-  (* Step 1: Expand a*b using the schoolbook decomposition
-       a*b = hh * M^2 + (lh + hl) * M + ll                     *)
-  assert (Hab : a * b = hh * (M * M) + (lh + hl) * M + ll).
-  { subst hh lh hl ll.
-    rewrite Ha_eq, Hb_eq.
-    ring. }
-  rewrite Hab.
+    (* mid mod B = acc1 mod B *)
+    subst mid.
+    rewrite Zmod_add_mod_idemp by lia.
+    fold acc1.
+    rewrite Zmod_small
+      by (pose proof (Z.mod_pos_bound (a0*b0) B HB_pos);
+          pose proof (Z.mod_pos_bound acc1 B HB_pos); nia).
 
-  (* Step 2: Cancel hh * M^2 by Z_mod_plus_full
-       (x + k * M^2) mod M^2 = x mod M^2                       *)
-  replace (hh * (M * M) + (lh + hl) * M + ll)
-    with ((lh + hl) * M + ll + hh * (M * M)) by ring.
-  rewrite Z_mod_plus_full.
+    (* product mod B^2 = product mod B + (product/B) mod B * B *)
+    rewrite <- (eval2_mod_mul B product) by lia.
+    unfold eval2.
+    rewrite Hr0, Hr1.
+    reflexivity. }
 
-  (* Step 3: Split each of lh, hl, ll into (high * M + low) and
-     regroup so that high parts form another multiple of M^2:
-       (lh + hl) * M + ll
-         = (lh/M + hl/M) * M^2
-           + ((lh%M + hl%M + ll/M) * M + ll%M)                 *)
-  assert (Hexp : (lh + hl) * M + ll =
-    (lh / M + hl / M) * (M * M) +
-    ((lh mod M + hl mod M + ll / M) * M + ll mod M)).
-  { rewrite Hlh_eq at 1.
-    rewrite Hhl_eq at 1.
-    rewrite Hll_eq at 1.
-    ring. }
-  rewrite Hexp.
+  (* --- hi = product / B^2 --- *)
+  { subst hi.
+    replace (a1 * b1 + a0 * b1 / B + a1 * b0 / B + mid / B)
+      with (a1 * b1 + (a0 * b1 / B + a1 * b0 / B + mid / B)) by ring.
+    subst mid.
+    rewrite <- (Zdiv_cross_product_split B (a0*b0/B) (a0*b1) (a1*b0)) by lia.
+    fold acc1.
 
-  (* Step 4: Cancel the (lh/M + hl/M) * M^2 term *)
-  replace ((lh / M + hl / M) * (M * M) +
-           ((lh mod M + hl mod M + ll / M) * M + ll mod M))
-    with ((lh mod M + hl mod M + ll / M) * M + ll mod M +
-          (lh / M + hl / M) * (M * M)) by ring.
-  rewrite Z_mod_plus_full.
+    (* a1*b1 + acc1/B = product / B^2 *)
+    rewrite Hprod.
+    replace (a0*b0 + (a0*b1 + a1*b0) * B + a1*b1 * B * B)
+      with (a1*b1 * (B * B) + ((a0*b1 + a1*b0) * B + a0*b0)) by ring.
+    rewrite Z.div_add_l by lia.
+    f_equal.
 
-  (* Step 5: Peel off [mod] and [+ ll%M] with [f_equal],
-     cancel the common [* M] factor, then [lia] finishes. *)
-  f_equal.
-  f_equal.
-  apply Z.mul_cancel_r with (p := M).
-  all: lia.
-Qed.
-
-(** The schoolbook multiplication high-half identity:
-    hh + (lh>>32) + (hl>>32) + (mid34>>32)  =  (a * b) / 2^64 *)
-Lemma umul128_hi_correct : forall a b,
-  0 <= a <= Int64.max_unsigned ->
-  0 <= b <= Int64.max_unsigned ->
-  let M := Int.modulus in
-  let a_lo := a mod M in
-  let a_hi := a / M in
-  let b_lo := b mod M in
-  let b_hi := b / M in
-  let mid34 := a_lo * b_lo / M + (a_lo * b_hi) mod M + (a_hi * b_lo) mod M in
-  a_hi * b_hi + a_lo * b_hi / M + a_hi * b_lo / M + mid34 / M = (a * b) / (M * M).
-Proof.
-  intros a b Ha Hb.
-  cbv zeta.
-
-  set (M := Int.modulus).
-  set (al := a mod M).
-  set (ah := a / M).
-  set (bl := b mod M).
-  set (bh := b / M).
-  set (ll := al * bl).
-  set (lh := al * bh).
-  set (hl := ah * bl).
-  set (hh := ah * bh).
-  fold al bl ah bh ll lh hl.
-
-  (* --- Setup --- *)
-  assert (HM : 0 < M) by (subst M; rep_lia).
-  assert (Hll_mod : 0 <= ll mod M < M) by (apply Z.mod_pos_bound; lia).
-  assert (Ha_eq : a = ah * M + al) by (subst ah al; apply div_mod_eq; lia).
-  assert (Hb_eq : b = bh * M + bl) by (subst bh bl; apply div_mod_eq; lia).
-  assert (Hlh_eq : lh = lh / M * M + lh mod M) by (apply div_mod_eq; lia).
-  assert (Hhl_eq : hl = hl / M * M + hl mod M) by (apply div_mod_eq; lia).
-  assert (Hll_eq : ll = ll / M * M + ll mod M) by (apply div_mod_eq; lia).
-
-  (* --- Main algebraic argument --- *)
-
-  (* Step 1: Expand a*b using the schoolbook decomposition
-       a*b = hh * M^2 + (lh + hl) * M + ll                     *)
-  assert (Hab : a * b = hh * (M * M) + (lh + hl) * M + ll).
-  { subst hh lh hl ll.
-    rewrite Ha_eq, Hb_eq.
-    ring. }
-  rewrite Hab.
-
-  (* Step 2: Split each of lh, hl, ll into (high * M + low) and
-     regroup so that high parts form another multiple of M^2:
-       (lh + hl) * M + ll
-         = (lh/M + hl/M) * M^2
-           + ((lh%M + hl%M + ll/M) * M + ll%M)                 *)
-  assert (Hexp : (lh + hl) * M + ll =
-    (lh / M + hl / M) * (M * M) +
-    ((lh mod M + hl mod M + ll / M) * M + ll mod M)).
-  { rewrite Hlh_eq at 1.
-    rewrite Hhl_eq at 1.
-    rewrite Hll_eq at 1.
-    ring. }
-
-  (* Step 3: Pull (hh + lh/M + hl/M) out of the division by
-     Z.div_add_l, then cancel it on both sides with [f_equal]:
-       ((k * M^2) + rest) / M^2  =  k + rest / M^2             *)
-  replace (hh * (M * M) + (lh + hl) * M + ll)
-    with ((hh + lh / M + hl / M) * (M * M) +
-          ((lh mod M + hl mod M + ll / M) * M + ll mod M))
-    by lia.
-  rewrite Z.div_add_l by lia.
-  f_equal.
-
-  (* Step 4: Decompose division by M*M into two divisions by M,
-     peel off the integer part, then kill the remainder:
-       (x * M + r) / (M * M)  =  (x + r/M) / M  =  x / M
-     because 0 <= r < M implies r / M = 0.                      *)
-  replace (ll / M + lh mod M + hl mod M)
-    with (lh mod M + hl mod M + ll / M) by lia.
-  rewrite <- Z.div_div by lia.
-  rewrite Z.div_add_l by lia.
-  rewrite (Z.div_small (ll mod M) M) by lia.
-  f_equal.
-  lia.
+    (* ((a0*b1 + a1*b0)*B + a0*b0) / B^2 = acc1/B *)
+    rewrite <- Z.div_div by lia.
+    replace ((a0 * b1 + a1 * b0) * B + a0 * b0)
+      with (acc1 * B + (a0 * b0) mod B)
+      by (subst acc1; pose proof (Z_div_mod_eq_full (a0*b0) B); nia).
+    rewrite Z.div_add_l by lia.
+    pose proof (Z.mod_pos_bound (a0*b0) B HB_pos).
+    rewrite (Z.div_small ((a0*b0) mod B) B) by lia.
+    rewrite Z.add_0_r.
+    reflexivity. }
 Qed.
 
 Lemma body_secp256k1_umul128:
@@ -332,40 +258,73 @@ Proof.
 
   set (lo_val := mid34 * Int.modulus + (a_lo * b_lo) mod Int.modulus) in *.
 
+  (* --- Apply the glue lemma --- *)
+
+  assert (Hprod_eq : eval2 Int.modulus a_lo a_hi *
+                     eval2 Int.modulus b_lo b_hi = av * bv).
+  { unfold eval2, a_lo, a_hi, b_lo, b_hi.
+    pose proof (Z_div_mod_eq_full av Int.modulus).
+    pose proof (Z_div_mod_eq_full bv Int.modulus).
+    nia. }
+
+  (* Strict half-word bounds for schoolbook_mul_2x2_mid *)
+  assert (Ha_lo_s : 0 <= a_lo < Int.modulus)
+    by (unfold a_lo; apply Z.mod_pos_bound; rep_lia).
+  assert (Ha_hi_s : 0 <= a_hi < Int.modulus).
+  { unfold a_hi.
+    split; [apply Z.div_pos; rep_lia|].
+    apply Z.div_lt_upper_bound; rep_lia. }
+  assert (Hb_lo_s : 0 <= b_lo < Int.modulus)
+    by (unfold b_lo; apply Z.mod_pos_bound; rep_lia).
+  assert (Hb_hi_s : 0 <= b_hi < Int.modulus).
+  { unfold b_hi.
+    split; [apply Z.div_pos; rep_lia|].
+    apply Z.div_lt_upper_bound; rep_lia. }
+
+  (* Apply glue lemma and fold back into lo_val / hi_val *)
+  pose proof (schoolbook_mul_2x2_mid Int.modulus ltac:(rep_lia)
+    a_lo a_hi b_lo b_hi
+    Ha_lo_s Ha_hi_s Hb_lo_s Hb_hi_s) as Hmul.
+  cbv zeta in Hmul.
+  rewrite Hprod_eq in Hmul.
+  fold mid34 in Hmul.
+  fold lo_val hi_val in Hmul.
+  destruct Hmul as (Hlo & Hhi).
+
   (* --- Postcondition --- *)
   Exists (mul_64 a b).
   unfold mul_64, u128_lo, u128_hi, uint64_to_val.
   simpl.
   entailer!.
 
-  (* Goal 1: lo_val represents (av * bv) mod 2^64 *)
-  + f_equal.
-    apply Int64.eqm_samerepr.
-    apply Int64.eqm_trans with (lo_val mod Int64.modulus);
-      [apply eqmod_mod; rep_lia|].
-    subst lo_val mid34 a_lo a_hi b_lo b_hi av bv.
+  (* Reduce both goals to equations *)
+  1: f_equal.
+  2: apply derives_refl'; do 2 f_equal.
+
+  (* ===== Cleanup ===== *)
+  clear - Hlo Hhi lo_val av bv.
+
+  (* Goal 1: lo *)
+  + apply Int64.eqm_samerepr.
+    apply Int64.eqm_trans with (lo_val mod Int64.modulus). 
+      { apply eqmod_mod. rep_lia. }
     change Int64.modulus with (Int.modulus * Int.modulus).
-    rewrite umul128_lo_correct by assumption.
+    rewrite Hlo.
     unfold limb64.
     simpl Z.of_nat.
     rewrite Z.mul_0_r, Z.div_1_r.
+    change (2^64) with Int64.modulus.
     change (Int.modulus * Int.modulus) with Int64.modulus.
     apply Int64.eqm_refl.
 
-  (* Goal 2: hi_val represents limb64 (av * bv) 1 *)
-  + apply derives_refl'.
-    f_equal.
-    f_equal.
-    apply Int64.eqm_samerepr.
-    subst hi_val mid34 a_lo a_hi b_lo b_hi av bv.
-    rewrite umul128_hi_correct by assumption.
+  (* Goal 2: hi *)
+  + apply Int64.eqm_samerepr.
+    rewrite Hhi.
+    change (Int.modulus * Int.modulus) with Int64.modulus.
     unfold limb64.
     simpl Z.of_nat.
     change (64 * 1)%Z with 64%Z.
     change (2^64) with Int64.modulus.
-    apply Int64.eqm_sym.
-    change (Int.modulus * Int.modulus) with Int64.modulus.
-    apply Int64.eqm_sym.
     apply eqmod_mod.
     rep_lia.
 Qed.

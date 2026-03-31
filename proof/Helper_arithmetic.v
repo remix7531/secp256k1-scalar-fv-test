@@ -3,7 +3,8 @@
     All results are stated over abstract base [B] and are independent
     of VST, secp256k1, or any specific word size.  Contents:
 
-    - Limb reconstruction and extraction ([eval4], [eval8], [limb]).
+    - Limb reconstruction and extraction ([eval2], [eval4], [eval8], [limb]).
+    - 2x2 schoolbook multiplication correctness ([schoolbook_mul_2x2]).
     - 4x4 schoolbook multiplication correctness ([schoolbook_mul_4x4]).
     - Carry-chain identity for 4-limb ripple addition ([reduce_carry_chain]).
     - Modular folding ([fold_sub_mod]) and conditional subtraction
@@ -22,6 +23,10 @@ Open Scope Z_scope.
 (* ================================================================= *)
 (** ** Definitions *)
 (* ================================================================= *)
+
+(** Little-endian 2-limb evaluation. *)
+Definition eval2 (B : Z) (a0 a1 : Z) : Z :=
+  a0 + a1 * B.
 
 (** Little-endian 4-limb evaluation. *)
 Definition eval4 (B : Z) (a0 a1 a2 a3 : Z) : Z :=
@@ -256,6 +261,36 @@ Qed.
 (** ** Auxiliary lemmas *)
 (* ================================================================= *)
 
+(** A 2-limb little-endian value fits in [[0, B^2)]. *)
+Lemma eval2_bound : forall B a0 a1,
+  B > 1 ->
+  0 <= a0 < B -> 0 <= a1 < B ->
+  0 <= eval2 B a0 a1 < B * B.
+Proof.
+  intros B a0 a1 HB H0 H1.
+  unfold eval2.
+  assert (0 <= a1 * B) by (apply Z.mul_nonneg_nonneg; lia).
+  assert (a1 * B <= (B - 1) * B) by (apply Z.mul_le_mono_nonneg_r; lia).
+  assert ((B - 1) + (B - 1) * B = B * B - 1) by ring.
+  lia.
+Qed.
+
+(** The product of two 2-limb numbers fits in 4 limbs. *)
+Lemma eval2_mul_range : forall B a0 a1 b0 b1,
+  B > 1 ->
+  0 <= a0 < B -> 0 <= a1 < B ->
+  0 <= b0 < B -> 0 <= b1 < B ->
+  0 <= eval2 B a0 a1 * eval2 B b0 b1 < B ^ 4.
+Proof.
+  intros.
+  pose proof (eval2_bound B a0 a1 ltac:(lia) ltac:(lia) ltac:(lia)) as Ha.
+  pose proof (eval2_bound B b0 b1 ltac:(lia) ltac:(lia) ltac:(lia)) as Hb.
+  replace (B ^ 4) with (B * B * (B * B)) by ring.
+  split.
+  - lia.
+  - apply Z.mul_lt_mono_nonneg; lia.
+Qed.
+
 (** A 4-limb little-endian value fits in [[0, B^4)]. *)
 Lemma eval4_bound : forall B a0 a1 a2 a3,
   B > 1 ->
@@ -326,6 +361,28 @@ Proof.
   - lia.
   - assert (Hbd : b * B = d * B) by lia.
     apply Z.mul_cancel_r in Hbd; lia.
+Qed.
+
+(** If three limbs of a 4-limb number are known to lie in [[0, B)) and
+    the value lies in [[0, B^4)), then the fourth (most significant) limb
+    also lies in [[0, B)).
+
+    This is the key bound used to promote [carry2] from [0 <= carry2]
+    (which follows from non-negativity of the accumulators) to
+    [carry2 < B] in [schoolbook_mul_2x2]. *)
+Lemma eval4_last_limb_bound : forall B r0 r1 r2 r3,
+  B > 1 ->
+  0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B ->
+  0 <= r3 ->
+  eval4 B r0 r1 r2 r3 < B ^ 4 ->
+  r3 < B.
+Proof.
+  intros B r0 r1 r2 r3 HB Hr0 Hr1 Hr2 Hr3_nn Heval.
+  unfold eval4 in Heval.
+  replace (B ^ 4) with (B ^ 3 * B) in Heval by ring.
+  assert (r3 * B ^ 3 < B ^ 3 * B) by nia.
+  assert (0 < B ^ 3) by (apply Z.pow_pos_nonneg; lia).
+  nia.
 Qed.
 
 (** If seven limbs of an 8-limb number are known to lie in [[0, B)) and
@@ -462,6 +519,39 @@ Qed.
 (** ** Auxiliary lemmas *)
 (* ================================================================= *)
 
+(** If a 4-limb representation with all digits in [[0, B)] equals [x],
+    then each digit is [(x / B^k) mod B].
+
+    Derived from [eval4_injective] and [eval4_limbs]. *)
+Lemma eval4_digit_unique : forall B r0 r1 r2 r3,
+  B > 1 ->
+  0 <= r0 < B -> 0 <= r1 < B -> 0 <= r2 < B -> 0 <= r3 < B ->
+  let x := eval4 B r0 r1 r2 r3 in
+  r0 = x mod B /\
+  r1 = (x / B) mod B /\
+  r2 = (x / B^2) mod B /\
+  r3 = (x / B^3) mod B.
+Proof.
+  intros B r0 r1 r2 r3 HB Hr0 Hr1 Hr2 Hr3 x.
+
+  assert (Hx : 0 <= x < B ^ 4) by (unfold x, eval4; nia).
+
+  pose proof (eval4_limbs B x HB Hx) as Hcanon.
+  assert (Hlimb : forall i, 0 <= limb B x i < B)
+    by (intro; unfold limb; apply Z.mod_pos_bound; lia).
+
+  symmetry in Hcanon.
+  apply (eval4_injective B _ _ _ _
+    (limb B x 0) (limb B x 1) (limb B x 2) (limb B x 3)
+    HB Hr0 Hr1 Hr2 Hr3) in Hcanon;
+    try apply Hlimb.
+
+  unfold limb in Hcanon.
+  simpl Z.of_nat in Hcanon.
+  rewrite ?Z.pow_0_r, ?Z.div_1_r, ?Z.pow_1_r in Hcanon.
+  exact Hcanon.
+Qed.
+
 (** If an 8-limb representation with all digits in [[0, B)] equals [x],
     then each digit is [(x / B^k) mod B].
 
@@ -503,6 +593,169 @@ Proof.
   simpl Z.of_nat in Hcanon.
   rewrite ?Z.pow_0_r, ?Z.div_1_r, ?Z.pow_1_r in Hcanon.
   exact Hcanon.
+Qed.
+
+(* ================================================================= *)
+(** ** Modular / division bridging lemmas *)
+(* ================================================================= *)
+
+(** Adding [y mod B] and [z mod B] instead of [y] and [z] does not
+    change the result modulo [B]. *)
+Lemma Zmod_add_mod_idemp : forall B x y z,
+  B > 0 ->
+  (x + y mod B + z mod B) mod B = (x + y + z) mod B.
+Proof.
+  intros B x y z HB.
+  rewrite (Z_div_mod_eq_full y B) at 2.
+  rewrite (Z_div_mod_eq_full z B) at 2.
+  replace (x + (B * (y / B) + y mod B) + (B * (z / B) + z mod B))
+    with (x + y mod B + z mod B + (y / B + z / B) * B) by ring.
+  rewrite Z_mod_plus_full.
+  reflexivity.
+Qed.
+
+(** Splitting a sum of three cross-products: dividing [x + y + z] by [B]
+    equals the sum of high parts [y / B + z / B] plus the carry from the
+    mid-level accumulation [(x + y mod B + z mod B) / B]. *)
+Lemma Zdiv_cross_product_split : forall B x y z,
+  B > 0 ->
+  (x + y + z) / B = y / B + z / B + (x + y mod B + z mod B) / B.
+Proof.
+  intros B x y z HB.
+  rewrite (Z_div_mod_eq_full y B) at 1.
+  rewrite (Z_div_mod_eq_full z B) at 1.
+  replace (x + (B * (y / B) + y mod B) + (B * (z / B) + z mod B))
+    with ((y / B + z / B) * B + (x + y mod B + z mod B)) by ring.
+  rewrite Z.div_add_l by lia.
+  lia.
+Qed.
+
+(** Two-digit reconstruction: the low two base-[B] digits of [x]
+    reassemble to [x mod (B * B)]. *)
+Lemma eval2_mod_mul : forall B x,
+  B > 0 ->
+  x mod B + (x / B) mod B * B = x mod (B * B).
+Proof.
+  intros B x HB.
+  pose proof (Z_div_mod_eq_full x B).
+  pose proof (Z_div_mod_eq_full (x / B) B).
+  pose proof (Z.mod_pos_bound x B ltac:(lia)).
+  pose proof (Z.mod_pos_bound (x / B) B ltac:(lia)).
+  symmetry.
+  replace x
+    with ((x mod B + (x / B) mod B * B) + (x / B / B) * (B * B)) at 1 by nia.
+  rewrite Z_mod_plus_full.
+  apply Zmod_small. nia.
+Qed.
+
+(* ================================================================= *)
+(** ** Schoolbook 2x2 multiplication correctness *)
+(* ================================================================= *)
+
+(** Given base [B > 1] and input limbs [a0, a1], [b0, b1] in [[0, B)],
+    the accumulate-and-carry algorithm produces output limbs [r0..r3]
+    that are the base-[B] digits of
+    [eval2 B a0 a1 * eval2 B b0 b1].
+
+    At each round [k] (for [k = 0 .. 2]):
+    - accumulate all cross-products [ai * bj] with [i + j = k]
+      into the carry from the previous round;
+    - extract the low limb [rk := acc mod B];
+    - propagate the carry [carry := acc / B].
+
+    The proof proceeds in three steps:
+    1. Telescope the carry chain to show
+       [eval4 B r0..r2 carry2 = product].
+    2. Bound [carry2 < B] using [product < B^4].
+    3. Apply [eval4_digit_unique] to extract all 4 digit equalities. *)
+Theorem schoolbook_mul_2x2 :
+  forall (B : Z),
+  B > 1 ->
+  forall (a0 a1 b0 b1 : Z),
+  0 <= a0 < B -> 0 <= a1 < B ->
+  0 <= b0 < B -> 0 <= b1 < B ->
+  forall (acc0 : Z), acc0 = a0 * b0 ->
+  forall (carry0 : Z), carry0 = acc0 / B ->
+  forall (acc1 : Z), acc1 = carry0 + a0 * b1 + a1 * b0 ->
+  forall (carry1 : Z), carry1 = acc1 / B ->
+  forall (acc2 : Z), acc2 = carry1 + a1 * b1 ->
+  forall (carry2 : Z), carry2 = acc2 / B ->
+  let r0 := acc0 mod B in
+  let r1 := acc1 mod B in
+  let r2 := acc2 mod B in
+  let r3 := carry2 mod B in
+  let product := eval2 B a0 a1 * eval2 B b0 b1 in
+  r0 = product mod B /\
+  r1 = (product / B) mod B /\
+  r2 = (product / B^2) mod B /\
+  r3 = (product / B^3) mod B.
+Proof.
+  intros B HB a0 a1 b0 b1
+         Ha0 Ha1 Hb0 Hb1
+         acc0 Hacc0 carry0 Hcarry0
+         acc1 Hacc1 carry1 Hcarry1
+         acc2 Hacc2 carry2 Hcarry2
+         r0 r1 r2 r3 product.
+
+  (* Step 1: Telescope the carry chain.
+     Expand [product] via [eval2], introduce div-mod decompositions,
+     substitute all carries and output limbs, then [nia] verifies
+     the telescoping cancellation. *)
+  assert (Hprod_expand : product =
+    a0*b0 + (a0*b1 + a1*b0)*B + a1*b1*B^2)
+    by (unfold product, eval2; ring).
+
+  pose proof (Z_div_mod_eq_full acc0 B) as DM0.
+  pose proof (Z_div_mod_eq_full acc1 B) as DM1.
+  pose proof (Z_div_mod_eq_full acc2 B) as DM2.
+  subst carry0 carry1 carry2.
+  subst r0 r1 r2 r3.
+  assert (Heval : eval4 B (acc0 mod B) (acc1 mod B) (acc2 mod B) (acc2 / B) = product).
+  { unfold eval4.
+    subst acc0 acc1 acc2.
+    nia. }
+
+  clear Hprod_expand DM0 DM1 DM2.
+
+  (* Step 2: Bound [carry2 = acc2 / B].
+     Non-negativity follows from the accumulators being non-negative.
+     Upper bound: delegate to [eval4_last_limb_bound] using [Heval]
+     and [eval2_mul_range]. *)
+  assert (Hprod_range : 0 <= product < B ^ 4)
+    by (subst product; apply eval2_mul_range; assumption).
+  assert (Hcarry2_nn : 0 <= acc2 / B).
+  { assert (0 <= acc0) by (subst acc0; nia).
+    assert (0 <= acc0 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc1) by (subst acc1; lia).
+    assert (0 <= acc1 / B) by (apply Z.div_pos; lia).
+    assert (0 <= acc2) by (subst acc2; lia).
+    apply Z.div_pos; lia. }
+  assert (Hcarry2_bound : 0 <= acc2 / B < B).
+  { split.
+    - exact Hcarry2_nn.
+    - apply eval4_last_limb_bound with
+        (r0 := acc0 mod B) (r1 := acc1 mod B) (r2 := acc2 mod B);
+        try (apply Z.mod_pos_bound; lia);
+        try assumption.
+      rewrite Heval.
+      exact (proj2 Hprod_range). }
+  clear Hprod_range Hacc0 Hacc1 Hacc2
+        Ha0 Ha1 Hb0 Hb1 Hcarry2_nn.
+
+  (* Step 3: Apply [eval4_digit_unique] and conclude.
+     All output limbs lie in [[0, B)] since they are [mod B] results.
+     We obtain digit equalities, rewrite [eval4 ...] to [product],
+     simplify [(acc2 / B) mod B] to [acc2 / B], and finish. *)
+  assert (Hr0 : 0 <= acc0 mod B < B) by (apply Z.mod_pos_bound; lia).
+  assert (Hr1 : 0 <= acc1 mod B < B) by (apply Z.mod_pos_bound; lia).
+  assert (Hr2 : 0 <= acc2 mod B < B) by (apply Z.mod_pos_bound; lia).
+  pose proof (eval4_digit_unique B
+    (acc0 mod B) (acc1 mod B) (acc2 mod B) (acc2 / B)
+    HB Hr0 Hr1 Hr2 Hcarry2_bound) as Hdigits.
+  rewrite Heval in Hdigits.
+  cbv zeta in Hdigits.
+  rewrite (Zmod_small (acc2 / B) B Hcarry2_bound).
+  exact Hdigits.
 Qed.
 
 (* ================================================================= *)

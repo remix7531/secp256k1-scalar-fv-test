@@ -9,6 +9,7 @@ proof/Helper_array_fold.v
 proof/Spec_scalar_4x64.v
 proof/Impl_scalar_4x64.v
 proof/Helper_verif.v
+proof/Helper_forward_call.v
 proof/Verif_u128_to_u64.v
 proof/Verif_u128_hi_u64.v
 proof/Verif_umul128.v

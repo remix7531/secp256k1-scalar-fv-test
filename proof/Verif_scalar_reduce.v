@@ -4,6 +4,7 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Helper_verif.
+Require Import scalar_4x64.Helper_forward_call.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_reduce *)
@@ -102,9 +103,9 @@ Proof.
   assert (Hd2 : 0 <= d2 < 2^64) by (subst d2; apply Z.mod_pos_bound; lia).
   assert (Hd3 : 0 <= d3 < 2^64) by (subst d3; apply Z.mod_pos_bound; lia).
 
-  assert (Hov0 : 0 <= overflow * N_C_0 < 2^64) by (unfold N_C_0; lia).
-  assert (Hov1 : 0 <= overflow * N_C_1 < 2^64) by (unfold N_C_1; lia).
-  assert (Hov2 : 0 <= overflow * N_C_2 < 2^64) by (unfold N_C_2; lia).
+  assert (Hov0 : 0 <= overflow * N_C_0 < 2^64) by rep_lia.
+  assert (Hov1 : 0 <= overflow * N_C_1 < 2^64) by rep_lia.
+  assert (Hov2 : 0 <= overflow * N_C_2 < 2^64) by rep_lia.
 
   (* ===== Round 0: t = d[0] + overflow*N_C_0 ===== *)
 
@@ -112,35 +113,22 @@ Proof.
   forward.
 
   (* secp256k1_u128_from_u64(&t, r->d[0]) *)
-  forward_call (v_t, mkUInt64 d0 Hd0, Tsh).
-  Intros t_init.
-  rename H into Ht_init.
+  forward_call_u128_from_u64 v_t (mkUInt64 d0 Hd0) Tsh t_init Ht_init.
 
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * N_C_0) *)
-  forward_call (v_t, t_init, mkUInt64 (overflow * N_C_0) Hov0, Tsh).
+  forward_call_u128_accum_u64 v_t t_init (mkUInt64 (overflow * N_C_0) Hov0) Tsh acc0 Hacc0_raw.
   { solve_reduce_expr_match. }
-  { simpl u64_val.
-    rewrite Ht_init.
-    simpl.
-    lia. }
 
-  Intros acc0.
-  rename H into Hacc0_raw.
   assert (Hacc0 : u128_val acc0 = d0 + overflow * N_C_0)
     by (rewrite Hacc0_raw, Ht_init; simpl; lia).
   clear Ht_init Hacc0_raw t_init.
 
   (* r->d[0] = secp256k1_u128_to_u64(&t) *)
-  forward_call (v_t, acc0, Tsh).
-  Intros lo0.
-  rename H into Hlo0.
+  forward_call_u128_to_u64 v_t acc0 Tsh lo0 Hlo0.
   forward.
 
   (* secp256k1_u128_rshift(&t, 64) *)
-  forward_call (v_t, acc0, 64, Tsh).
-  Intros carry0.
-  rename H into Hcarry0.
-  deadvars!.
+  forward_call_u128_rshift v_t acc0 Tsh carry0 Hcarry0.
 
   assert (Hcarry0_val : u128_val carry0 = (d0 + overflow * N_C_0) / 2^64)
     by (rewrite Hcarry0, Hacc0; reflexivity).
@@ -152,39 +140,28 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&t, r->d[1]) *)
-  forward_call (v_t, carry0, mkUInt64 d1 Hd1, Tsh).
+  forward_call_u128_accum_u64 v_t carry0 (mkUInt64 d1 Hd1) Tsh t1a Ht1a.
   { rewrite Hcarry0_val.
     reduce_u128_bound. }
 
-  Intros t1a.
-  rename H into Ht1a.
-
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * ~N_1) *)
-  forward_call (v_t, t1a, mkUInt64 (overflow * N_C_1) Hov1, Tsh).
+  forward_call_u128_accum_u64 v_t t1a (mkUInt64 (overflow * N_C_1) Hov1) Tsh acc1 Hacc1_raw.
   { solve_reduce_expr_match. }
   { rewrite Ht1a.
     simpl u64_val.
     rewrite Hcarry0_val.
     reduce_u128_bound. }
-
-  Intros acc1.
-  rename H into Hacc1_raw.
   assert (Hacc1 : u128_val acc1 =
     (d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1)
     by (rewrite Hacc1_raw, Ht1a; simpl u64_val; rewrite Hcarry0_val; lia).
   clear Ht1a Hacc1_raw Hcarry0_val carry0 t1a.
 
   (* r->d[1] = secp256k1_u128_to_u64(&t) *)
-  forward_call (v_t, acc1, Tsh).
-  Intros lo1.
-  rename H into Hlo1.
+  forward_call_u128_to_u64 v_t acc1 Tsh lo1 Hlo1.
   forward.
 
   (* secp256k1_u128_rshift(&t, 64) *)
-  forward_call (v_t, acc1, 64, Tsh).
-  Intros carry1.
-  rename H into Hcarry1.
-  deadvars!.
+  forward_call_u128_rshift v_t acc1 Tsh carry1 Hcarry1.
 
   assert (Hcarry1_val : u128_val carry1 = u128_val acc1 / 2^64)
     by exact Hcarry1.
@@ -196,23 +173,17 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&t, r->d[2]) *)
-  forward_call (v_t, carry1, mkUInt64 d2 Hd2, Tsh).
+  forward_call_u128_accum_u64 v_t carry1 (mkUInt64 d2 Hd2) Tsh t2a Ht2a.
   { rewrite Hcarry1_val, Hacc1.
     reduce_u128_bound. }
 
-  Intros t2a.
-  rename H into Ht2a.
-
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * N_C_2) *)
-  forward_call (v_t, t2a, mkUInt64 (overflow * N_C_2) Hov2, Tsh).
+  forward_call_u128_accum_u64 v_t t2a (mkUInt64 (overflow * N_C_2) Hov2) Tsh acc2 Hacc2_raw.
   { solve_reduce_expr_match. }
   { rewrite Ht2a.
     simpl u64_val.
     rewrite Hcarry1_val, Hacc1.
     reduce_u128_bound. }
-
-  Intros acc2.
-  rename H into Hacc2_raw.
   assert (Hacc2 : u128_val acc2 =
     ((d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1) / 2^64
     + d2 + overflow * N_C_2)
@@ -220,16 +191,11 @@ Proof.
   clear Ht2a Hacc2_raw Hcarry1_val carry1 t2a.
 
   (* r->d[2] = secp256k1_u128_to_u64(&t) *)
-  forward_call (v_t, acc2, Tsh).
-  Intros lo2.
-  rename H into Hlo2.
+  forward_call_u128_to_u64 v_t acc2 Tsh lo2 Hlo2.
   forward.
 
   (* secp256k1_u128_rshift(&t, 64) *)
-  forward_call (v_t, acc2, 64, Tsh).
-  Intros carry2.
-  rename H into Hcarry2.
-  deadvars!.
+  forward_call_u128_rshift v_t acc2 Tsh carry2 Hcarry2.
 
   assert (Hcarry2_val : u128_val carry2 = u128_val acc2 / 2^64)
     by exact Hcarry2.
@@ -241,12 +207,9 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&t, r->d[3]) *)
-  forward_call (v_t, carry2, mkUInt64 d3 Hd3, Tsh).
+  forward_call_u128_accum_u64 v_t carry2 (mkUInt64 d3 Hd3) Tsh acc3 Hacc3_raw.
   { rewrite Hcarry2_val, Hacc2.
     reduce_u128_bound. }
-
-  Intros acc3.
-  rename H into Hacc3_raw.
   assert (Hacc3 : u128_val acc3 =
     (((d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1) / 2^64
      + d2 + overflow * N_C_2) / 2^64 + d3)
@@ -254,9 +217,7 @@ Proof.
   clear Hacc3_raw Hcarry2_val carry2.
 
   (* r->d[3] = secp256k1_u128_to_u64(&t) *)
-  forward_call (v_t, acc3, Tsh).
-  Intros lo3.
-  rename H into Hlo3.
+  forward_call_u128_to_u64 v_t acc3 Tsh lo3 Hlo3.
   forward.
 
   (* return overflow *)
@@ -347,7 +308,7 @@ Proof.
   (* Apply the carry-chain identity *)
   pose proof (reduce_carry_chain B d0 d1 d2 d3 N_C_0 N_C_1 N_C_2 overflow
     ltac:(subst B; lia) Hd0 Hd1 Hd2 Hd3
-    ltac:(unfold N_C_0; lia) ltac:(unfold N_C_1; lia) ltac:(unfold N_C_2; lia)
+    ltac:(rep_lia) ltac:(rep_lia) ltac:(rep_lia)
     ltac:(lia)) as Hchain_raw.
   cbv zeta in Hchain_raw.
   fold t0 t1 t2 t3 in Hchain_raw.

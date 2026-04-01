@@ -4,6 +4,7 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Helper_verif.
+Require Import scalar_4x64.Helper_forward_call.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul *)
@@ -19,22 +20,18 @@ Proof.
   change t_secp256k1_scalar with t_secp256k1_uint256.
 
   (* secp256k1_scalar_mul_512(l, a, b) *)
-  forward_call (v_l, a_ptr, b_ptr,
-    scalar_to_u256 a, scalar_to_u256 b,
-    Tsh, sh_a, sh_b).
-
-  Intros l.
+  forward_call_scalar_mul_512 v_l a_ptr b_ptr
+    (scalar_to_u256 a) (scalar_to_u256 b)
+    Tsh sh_a sh_b l Hl.
 
   (* secp256k1_scalar_reduce_512(r, l) *)
-  forward_call (r_ptr, v_l, l, sh_r, Tsh).
-
-  Intros r.
+  forward_call_scalar_reduce_512 r_ptr v_l l sh_r Tsh r Hr.
 
   (* Postcondition *)
   Exists r.
   entailer!.
   - (* r = scalar_mul a b *)
-    destruct r as [rv Hr].
+    destruct r as [rv Hr_range].
     destruct a as [av Ha].
     destruct b as [bv Hb].
     unfold scalar_mul, scalar_to_u256, mul_256 in *.

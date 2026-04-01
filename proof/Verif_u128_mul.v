@@ -4,6 +4,7 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Helper_verif.
+Require Import scalar_4x64.Helper_forward_call.
 
 (* ================================================================= *)
 (** ** secp256k1_u128_mul *)
@@ -24,9 +25,8 @@ Proof.
   rewrite (field_at_data_at sh _ [StructField _hi]) by reflexivity.
 
   (* r->lo = secp256k1_umul128(a, b, &r->hi) *)
-  forward_call (a, b,
-    field_address t_secp256k1_uint128 [StructField _hi] r_ptr, sh).
-  Intros vret.
+  forward_call_umul128 a b
+    (field_address t_secp256k1_uint128 [StructField _hi] r_ptr) sh vret Hvret.
 
   (* r->lo = _t'1 *)
   forward.

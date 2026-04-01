@@ -55,6 +55,83 @@ Proof.
   cancel.
 Qed.
 
+(** Decompose an uninitialized 8-element array into 8 individual slots.
+    This lets [forward_call] for [extract] find its target slot
+    automatically via [cancel], without manual [peel_array_slot] calls. *)
+Lemma unfold_data_at__tulong_8 :
+  forall (sh : share) (p : val),
+  field_compatible (tarray tulong 8) [] p ->
+  data_at_ sh (tarray tulong 8) p
+  |-- data_at_ sh tulong (field_address (tarray tulong 8) (SUB 0) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 1) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 2) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 3) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 4) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 5) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 6) p) *
+      data_at_ sh tulong (field_address (tarray tulong 8) (SUB 7) p).
+Proof.
+  intros sh p H.
+
+  (* --- Phase 1: Split the 8-element array into singletons --- *)
+  rewrite (split2_data_at__Tarray_app 1 8 sh tulong p) by lia.
+  rewrite (split2_data_at__Tarray_app 1 7 sh tulong
+    (field_address0 (tarray tulong 8) (SUB 1) p)) by lia.
+  rewrite (split2_data_at__Tarray_app 1 6 sh tulong
+    (field_address0 (tarray tulong 7) (SUB 1)
+      (field_address0 (tarray tulong 8) (SUB 1) p))) by lia.
+  rewrite (split2_data_at__Tarray_app 1 5 sh tulong
+    (field_address0 (tarray tulong 6) (SUB 1)
+      (field_address0 (tarray tulong 7) (SUB 1)
+        (field_address0 (tarray tulong 8) (SUB 1) p)))) by lia.
+  rewrite (split2_data_at__Tarray_app 1 4 sh tulong
+    (field_address0 (tarray tulong 5) (SUB 1)
+      (field_address0 (tarray tulong 6) (SUB 1)
+        (field_address0 (tarray tulong 7) (SUB 1)
+          (field_address0 (tarray tulong 8) (SUB 1) p))))) by lia.
+  rewrite (split2_data_at__Tarray_app 1 3 sh tulong
+    (field_address0 (tarray tulong 4) (SUB 1)
+      (field_address0 (tarray tulong 5) (SUB 1)
+        (field_address0 (tarray tulong 6) (SUB 1)
+          (field_address0 (tarray tulong 7) (SUB 1)
+            (field_address0 (tarray tulong 8) (SUB 1) p)))))) by lia.
+  rewrite (split2_data_at__Tarray_app 1 2 sh tulong
+    (field_address0 (tarray tulong 3) (SUB 1)
+      (field_address0 (tarray tulong 4) (SUB 1)
+        (field_address0 (tarray tulong 5) (SUB 1)
+          (field_address0 (tarray tulong 6) (SUB 1)
+            (field_address0 (tarray tulong 7) (SUB 1)
+              (field_address0 (tarray tulong 8) (SUB 1) p))))))) by lia.
+
+  (* --- Phase 2: Simplify subtraction remnants --- *)
+  change (8-1) with 7.
+  change (7-1) with 6.
+  change (6-1) with 5.
+  change (5-1) with 4.
+  change (4-1) with 3.
+  change (3-1) with 2.
+  change (2-1) with 1.
+
+  (* --- Phase 3: Convert all singletons --- *)
+  rewrite !data__at_singleton_array_eq.
+
+  (* --- Phase 4: Collapse nested field_address0 to field_address --- *)
+  rewrite !field_address0_SUB_SUB by lia.
+  change (1 + 1) with 2.
+  change (1 + (1 + 1)) with 3.
+  change (1 + (1 + (1 + 1))) with 4.
+  change (1 + (1 + (1 + (1 + 1)))) with 5.
+  change (1 + (1 + (1 + (1 + (1 + 1))))) with 6.
+  change (1 + (1 + (1 + (1 + (1 + (1 + 1)))))) with 7.
+
+  (* Normalize addresses to offset_val *)
+  rewrite !(arr_field_address0 tulong 8 p _ H) by lia.
+  rewrite !(arr_field_address tulong 8 p _ H) by lia.
+  simpl (sizeof tulong * _).
+  rewrite isptr_offset_val_zero by solve_isptr.
+  cancel.
+Qed.
+
 
 (* ================================================================= *)
 (** ** Size 2 *)

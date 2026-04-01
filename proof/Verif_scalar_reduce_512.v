@@ -4,6 +4,7 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Helper_verif.
+Require Import scalar_4x64.Helper_forward_call.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_reduce_512 *)
@@ -16,13 +17,6 @@ Require Import scalar_4x64.Helper_verif.
 Ltac norm_limb64_0 :=
   unfold limb64; simpl Z.of_nat; simpl Z.mul;
   rewrite ?Z.pow_0_r, ?Z.div_1_r.
-
-(** Destructure an extract_fast / extract result pair. *)
-Ltac intro_extract lo carry Hlo Hcarry :=
-  let vret := fresh "vret" in
-  Intros vret; destruct vret as [lo carry];
-  rename H into Hlo; rename H0 into Hcarry;
-  simpl fst in *; simpl snd in *.
 
 Lemma round_identity : forall (acc : Acc) (lo : UInt64) (carry : Acc),
   lo = acc_lo acc ->
@@ -188,20 +182,18 @@ Proof.
     by exact (mkScalar 0 ltac:(unfold secp256k1_N; lia)).
 
   (* Concrete upper bounds for N_C constants *)
-  assert (HNC0 : N_C_0 < 2^63) by (unfold N_C_0; lia).
-  assert (HNC1 : N_C_1 < 2^63) by (unfold N_C_1; lia).
-  assert (HNC0_nn : 0 <= N_C_0) by (unfold N_C_0; lia).
-  assert (HNC1_nn : 0 <= N_C_1) by (unfold N_C_1; lia).
+  assert (HNC0 : N_C_0 < 2^63) by rep_lia.
+  assert (HNC1 : N_C_1 < 2^63) by rep_lia.
+  assert (HNC0_nn : 0 <= N_C_0) by rep_lia.
+  assert (HNC1_nn : 0 <= N_C_1) by rep_lia.
 
   (* Product bounds: x * N_C_j <= (2^64-1) * N_C_j < 2^127 *)
   assert (Hprod_NC0 : forall x, 0 <= x < 2^64 -> x * N_C_0 <= (2^64 - 1) * N_C_0)
-    by (intros; apply Z.mul_le_mono_nonneg_r; lia).
+    by (intros; apply Z.mul_le_mono_nonneg_r; rep_lia).
   assert (Hprod_NC1 : forall x, 0 <= x < 2^64 -> x * N_C_1 <= (2^64 - 1) * N_C_1)
-    by (intros; apply Z.mul_le_mono_nonneg_r; lia).
-  assert (HNC0_prod_bound : (2^64 - 1) * N_C_0 < 2^127)
-    by (unfold N_C_0; lia).
-  assert (HNC1_prod_bound : (2^64 - 1) * N_C_1 < 2^127)
-    by (unfold N_C_1; lia).
+    by (intros; apply Z.mul_le_mono_nonneg_r; rep_lia).
+  assert (HNC0_prod_bound : (2^64 - 1) * N_C_0 < 2^127) by rep_lia.
+  assert (HNC1_prod_bound : (2^64 - 1) * N_C_1 < 2^127) by rep_lia.
 
   (* Convert data_at -> field_at for array element access *)
   change (data_at sh_l (tarray tulong 8) (uint512_to_val l) l_ptr)
@@ -251,27 +243,18 @@ Proof.
   (* ===== Round 0: muladd_fast(n0, N_C_0); extract_fast -> m0 ===== *)
 
   (* muladd_fast(&acc, n0, N_C_0) *)
-  forward_call (v_acc, acc_s1_init,
-                mkUInt64 n0 Hn0, mkUInt64 N_C_0 N_C_0_range, Tsh).
+  forward_call_muladd_fast v_acc acc_s1_init
+                (mkUInt64 n0 Hn0) (mkUInt64 N_C_0 N_C_0_range) acc_s1_0 Hacc_s1_0.
   { (* acc_val acc_s1_init + n0 * N_C_0 < 2^128 *)
     simpl.
     pose proof (Hprod_NC0 n0 Hn0).
     lia. }
 
-  Intros acc_s1_0.
-  rename H into Hacc_s1_0.
   assert (Hacc_s1_0v : acc_val acc_s1_0 = l0 + n0 * N_C_0)
     by (rewrite Hacc_s1_0; simpl; lia).
 
   (* extract_fast(&acc, &m0) *)
-  forward_call (v_acc, acc_s1_0, v_m0, Tsh, Tsh).
-  { (* acc < 2^128 *)
-    rewrite Hacc_s1_0v.
-    pose proof (Hprod_NC0 n0 Hn0).
-    lia. }
-
-  intro_extract m0_u64 carry_s1_0 Hm0_eq Hcarry_s1_0_eq.
-  deadvars!.
+  forward_call_extract_fast v_acc acc_s1_0 v_m0 Tsh Tsh m0_u64 carry_s1_0 Hm0_eq Hcarry_s1_0_eq.
 
   assert (Hcarry_s1_0_ub : acc_val carry_s1_0 <= N_C_0).
   { rewrite Hcarry_s1_0_eq, Hacc_s1_0v.
@@ -289,45 +272,18 @@ Proof.
   forward.
 
   (* sumadd_fast(&acc, l[1]) *)
-  forward_call (v_acc, carry_s1_0, mkUInt64 l1 Hl1, Tsh).
-  { (* carry + l1 < 2^128 *)
-    pose proof (acc_range carry_s1_0).
-    simpl u64_val.
-    lia. }
-
-  Intros acc_s1_1a.
-  rename H into Hacc_s1_1a.
+  forward_call_sumadd_fast v_acc carry_s1_0 (mkUInt64 l1 Hl1) acc_s1_1a Hacc_s1_1a.
 
   (* muladd(&acc, n1, N_C_0) *)
-  forward_call (v_acc, acc_s1_1a,
-                mkUInt64 n1 Hn1, mkUInt64 N_C_0 N_C_0_range, Tsh).
-  { (* carry_s1_0 + l1 + n1*NC0 < 2^192 *)
-    rewrite Hacc_s1_1a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n1 Hn1).
-    lia. }
-
-  Intros acc_s1_1b.
-  rename H into Hacc_s1_1b.
+  forward_call_muladd v_acc acc_s1_1a
+                (mkUInt64 n1 Hn1) (mkUInt64 N_C_0 N_C_0_range) acc_s1_1b Hacc_s1_1b.
 
   (* muladd(&acc, n0, N_C_1) *)
-  forward_call (v_acc, acc_s1_1b,
-                mkUInt64 n0 Hn0, mkUInt64 N_C_1 N_C_1_range, Tsh).
-  { (* carry_s1_0 + l1 + n1*NC0 + n0*NC1 < 2^192 *)
-    rewrite Hacc_s1_1b, Hacc_s1_1a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n1 Hn1).
-    pose proof (Hprod_NC1 n0 Hn0).
-    lia. }
-
-  Intros acc_s1_1.
-  rename H into Hacc_s1_1.
-  deadvars!.
+  forward_call_muladd v_acc acc_s1_1b
+                (mkUInt64 n0 Hn0) (mkUInt64 N_C_1 N_C_1_range) acc_s1_1 Hacc_s1_1.
 
   (* extract(&acc, &m1) *)
-  forward_call (v_acc, acc_s1_1, v_m1, Tsh, Tsh).
-
-  intro_extract m1_u64 carry_s1_1 Hm1_eq Hcarry_s1_1_eq.
+  forward_call_extract v_acc acc_s1_1 v_m1 Tsh Tsh m1_u64 carry_s1_1 Hm1_eq Hcarry_s1_1_eq.
 
   (* Clean accumulator value for congruence proof *)
   assert (Hacc_s1_1_val : acc_val acc_s1_1 = acc_val carry_s1_0 + l1 + n1 * N_C_0 + n0 * N_C_1)
@@ -352,56 +308,21 @@ Proof.
   forward.
 
   (* sumadd(&acc, l[2]) *)
-  forward_call (v_acc, carry_s1_1, mkUInt64 l2 Hl2, Tsh).
-  { (* carry_s1_1 + l2 < 2^192 *)
-    pose proof (acc_range carry_s1_1).
-    simpl u64_val.
-    lia. }
-
-  Intros acc_s1_2a.
-  rename H into Hacc_s1_2a.
+  forward_call_sumadd v_acc carry_s1_1 (mkUInt64 l2 Hl2) acc_s1_2a Hacc_s1_2a.
 
   (* muladd(&acc, n2, N_C_0) *)
-  forward_call (v_acc, acc_s1_2a,
-                mkUInt64 n2 Hn2, mkUInt64 N_C_0 N_C_0_range, Tsh).
-  { (* carry_s1_1 + l2 + n2*NC0 < 2^192 *)
-    rewrite Hacc_s1_2a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n2 Hn2).
-    lia. }
-
-  Intros acc_s1_2b.
-  rename H into Hacc_s1_2b.
+  forward_call_muladd v_acc acc_s1_2a
+                (mkUInt64 n2 Hn2) (mkUInt64 N_C_0 N_C_0_range) acc_s1_2b Hacc_s1_2b.
 
   (* muladd(&acc, n1, N_C_1) *)
-  forward_call (v_acc, acc_s1_2b,
-                mkUInt64 n1 Hn1, mkUInt64 N_C_1 N_C_1_range, Tsh).
-  { (* carry_s1_1 + l2 + n2*NC0 + n1*NC1 < 2^192 *)
-    rewrite Hacc_s1_2b, Hacc_s1_2a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n2 Hn2).
-    pose proof (Hprod_NC1 n1 Hn1).
-    lia. }
-
-  Intros acc_s1_2c.
-  rename H into Hacc_s1_2c.
+  forward_call_muladd v_acc acc_s1_2b
+                (mkUInt64 n1 Hn1) (mkUInt64 N_C_1 N_C_1_range) acc_s1_2c Hacc_s1_2c.
 
   (* sumadd(&acc, n0) *)
-  forward_call (v_acc, acc_s1_2c, mkUInt64 n0 Hn0, Tsh).
-  { (* carry_s1_1 + l2 + n2*NC0 + n1*NC1 + n0 < 2^192 *)
-    rewrite Hacc_s1_2c, Hacc_s1_2b, Hacc_s1_2a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n2 Hn2).
-    pose proof (Hprod_NC1 n1 Hn1).
-    lia. }
-
-  Intros acc_s1_2.
-  rename H into Hacc_s1_2.
-  deadvars!.
+  forward_call_sumadd v_acc acc_s1_2c (mkUInt64 n0 Hn0) acc_s1_2 Hacc_s1_2.
 
   (* extract(&acc, &m2) *)
-  forward_call (v_acc, acc_s1_2, v_m2, Tsh, Tsh).
-  intro_extract m2_u64 carry_s1_2 Hm2_eq Hcarry_s1_2_eq.
+  forward_call_extract v_acc acc_s1_2 v_m2 Tsh Tsh m2_u64 carry_s1_2 Hm2_eq Hcarry_s1_2_eq.
 
   assert (Hacc_s1_2_val : acc_val acc_s1_2 =
     acc_val carry_s1_1 + l2 + n2 * N_C_0 + n1 * N_C_1 + n0)
@@ -427,55 +348,21 @@ Proof.
   forward.
 
   (* sumadd(&acc, l[3]) *)
-  forward_call (v_acc, carry_s1_2, mkUInt64 l3 Hl3, Tsh).
-  { (* carry_s1_2 + l3 < 2^192 *)
-    simpl u64_val.
-    lia. }
-
-  Intros acc_s1_3a.
-  rename H into Hacc_s1_3a.
+  forward_call_sumadd v_acc carry_s1_2 (mkUInt64 l3 Hl3) acc_s1_3a Hacc_s1_3a.
 
   (* muladd(&acc, n3, N_C_0) *)
-  forward_call (v_acc, acc_s1_3a,
-                mkUInt64 n3 Hn3, mkUInt64 N_C_0 N_C_0_range, Tsh).
-  { (* carry_s1_2 + l3 + n3*NC0 < 2^192 *)
-    rewrite Hacc_s1_3a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n3 Hn3).
-    lia. }
-
-  Intros acc_s1_3b.
-  rename H into Hacc_s1_3b.
+  forward_call_muladd v_acc acc_s1_3a
+                (mkUInt64 n3 Hn3) (mkUInt64 N_C_0 N_C_0_range) acc_s1_3b Hacc_s1_3b.
 
   (* muladd(&acc, n2, N_C_1) *)
-  forward_call (v_acc, acc_s1_3b,
-                mkUInt64 n2 Hn2, mkUInt64 N_C_1 N_C_1_range, Tsh).
-  { (* carry_s1_2 + l3 + n3*NC0 + n2*NC1 < 2^192 *)
-    rewrite Hacc_s1_3b, Hacc_s1_3a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n3 Hn3).
-    pose proof (Hprod_NC1 n2 Hn2).
-    lia. }
-
-  Intros acc_s1_3c.
-  rename H into Hacc_s1_3c.
+  forward_call_muladd v_acc acc_s1_3b
+                (mkUInt64 n2 Hn2) (mkUInt64 N_C_1 N_C_1_range) acc_s1_3c Hacc_s1_3c.
 
   (* sumadd(&acc, n1) *)
-  forward_call (v_acc, acc_s1_3c, mkUInt64 n1 Hn1, Tsh).
-  { (* carry_s1_2 + l3 + n3*NC0 + n2*NC1 + n1 < 2^192 *)
-    rewrite Hacc_s1_3c, Hacc_s1_3b, Hacc_s1_3a.
-    simpl u64_val.
-    pose proof (Hprod_NC0 n3 Hn3).
-    pose proof (Hprod_NC1 n2 Hn2).
-    lia. }
-
-  Intros acc_s1_3.
-  rename H into Hacc_s1_3.
-  deadvars!.
+  forward_call_sumadd v_acc acc_s1_3c (mkUInt64 n1 Hn1) acc_s1_3 Hacc_s1_3.
 
   (* extract(&acc, &m3) *)
-  forward_call (v_acc, acc_s1_3, v_m3, Tsh, Tsh).
-  intro_extract m3_u64 carry_s1_3 Hm3_eq Hcarry_s1_3_eq.
+  forward_call_extract v_acc acc_s1_3 v_m3 Tsh Tsh m3_u64 carry_s1_3 Hm3_eq Hcarry_s1_3_eq.
 
   assert (Hacc_s1_3_val : acc_val acc_s1_3 =
     acc_val carry_s1_2 + l3 + n3 * N_C_0 + n2 * N_C_1 + n1)
@@ -497,32 +384,14 @@ Proof.
   (* ===== Round 4: muladd(n3,NC1); sumadd(n2); extract -> m4 ===== *)
 
   (* muladd(&acc, n3, N_C_1) *)
-  forward_call (v_acc, carry_s1_3,
-                mkUInt64 n3 Hn3, mkUInt64 N_C_1 N_C_1_range, Tsh).
-  { (* carry_s1_3 + n3*NC1 < 2^192 *)
-    simpl u64_val.
-    pose proof (Hprod_NC1 n3 Hn3).
-    lia. }
-
-  Intros acc_s1_4a.
-  rename H into Hacc_s1_4a.
+  forward_call_muladd v_acc carry_s1_3
+                (mkUInt64 n3 Hn3) (mkUInt64 N_C_1 N_C_1_range) acc_s1_4a Hacc_s1_4a.
 
   (* sumadd(&acc, n2) *)
-  forward_call (v_acc, acc_s1_4a, mkUInt64 n2 Hn2, Tsh).
-  { (* carry_s1_3 + n3*NC1 + n2 < 2^192 *)
-    rewrite Hacc_s1_4a.
-    simpl u64_val.
-    pose proof (Hprod_NC1 n3 Hn3).
-    lia. }
-
-  Intros acc_s1_4.
-  rename H into Hacc_s1_4.
-  deadvars!.
+  forward_call_sumadd v_acc acc_s1_4a (mkUInt64 n2 Hn2) acc_s1_4 Hacc_s1_4.
 
   (* extract(&acc, &m4) *)
-  forward_call (v_acc, acc_s1_4, v_m4, Tsh, Tsh).
-
-  intro_extract m4_u64 carry_s1_4 Hm4_eq Hcarry_s1_4_eq.
+  forward_call_extract v_acc acc_s1_4 v_m4 Tsh Tsh m4_u64 carry_s1_4 Hm4_eq Hcarry_s1_4_eq.
 
   assert (Hacc_s1_4_val : acc_val acc_s1_4 = acc_val carry_s1_3 + n3 * N_C_1 + n2)
     by (rewrite Hacc_s1_4, Hacc_s1_4a; simpl; lia).
@@ -541,22 +410,10 @@ Proof.
   (* ===== Round 5: sumadd_fast(n3); extract_fast -> m5 ===== *)
 
   (* sumadd_fast(&acc, n3) *)
-  forward_call (v_acc, carry_s1_4, mkUInt64 n3 Hn3, Tsh).
-  { (* carry + n3 < 2^128 *)
-    simpl u64_val.
-    lia. }
-
-  Intros acc_s1_5.
-  rename H into Hacc_s1_5.
+  forward_call_sumadd_fast v_acc carry_s1_4 (mkUInt64 n3 Hn3) acc_s1_5 Hacc_s1_5.
 
   (* extract_fast(&acc, &m5) *)
-  forward_call (v_acc, acc_s1_5, v_m5, Tsh, Tsh).
-  { (* carry_s1_4 + n3 < 2^128 *)
-    rewrite Hacc_s1_5.
-    simpl u64_val.
-    lia. }
-
-  intro_extract m5_u64 carry_s1_5 Hm5_eq Hcarry_s1_5_eq.
+  forward_call_extract_fast v_acc acc_s1_5 v_m5 Tsh Tsh m5_u64 carry_s1_5 Hm5_eq Hcarry_s1_5_eq.
 
   assert (Hacc_s1_5_val : acc_val acc_s1_5 = acc_val carry_s1_4 + n3)
     by (rewrite Hacc_s1_5; simpl; lia).
@@ -669,8 +526,8 @@ Proof.
   forward.
 
   (* muladd_fast(&acc__1, m4, N_C_0) *)
-  forward_call (v_acc__1, acc_s2_init, m4_u64,
-                mkUInt64 N_C_0 N_C_0_range, Tsh).
+  forward_call_muladd_fast v_acc__1 acc_s2_init m4_u64
+                (mkUInt64 N_C_0 N_C_0_range) acc_s2_0 Hacc_s2_0.
   { (* acc_val acc_s2_init + u64_val m4 * N_C_0 < 2^128 *)
     unfold acc_s2_init.
     simpl acc_val.
@@ -679,11 +536,8 @@ Proof.
     pose proof (Hprod_NC0 (u64_val m4_u64) ltac:(lia)).
     lia. }
 
-  Intros acc_s2_0.
-  rename H into Hacc_s2_0.
-
   (* extract_fast(&acc__1, &p0) *)
-  forward_call (v_acc__1, acc_s2_0, v_p0, Tsh, Tsh).
+  forward_call_extract_fast v_acc__1 acc_s2_0 v_p0 Tsh Tsh p0_u64 carry_s2_0 Hp0_eq Hcarry_s2_0_eq.
   { (* m0v + m4*NC0 < 2^128 *)
     rewrite Hacc_s2_0.
     unfold acc_s2_init.
@@ -692,9 +546,6 @@ Proof.
     pose proof (u64_range m4_u64).
     pose proof (Hprod_NC0 (u64_val m4_u64) ltac:(lia)).
     lia. }
-
-  intro_extract p0_u64 carry_s2_0 Hp0_eq Hcarry_s2_0_eq.
-  deadvars!.
 
   assert (Hacc_s2_0_val : acc_val acc_s2_0 = m0v + u64_val m4_u64 * N_C_0)
     by (rewrite Hacc_s2_0; unfold acc_s2_init; simpl; lia).
@@ -718,21 +569,18 @@ Proof.
   forward.
 
   (* sumadd_fast(&acc__1, m1) *)
-  forward_call (v_acc__1, carry_s2_0, m1_u64, Tsh).
+  forward_call_sumadd_fast v_acc__1 carry_s2_0 m1_u64 acc_s2_1a Hacc_s2_1a.
   { (* carry_s2_0 + m1 < 2^128 *)
     simpl u64_val.
     pose proof (u64_range m1_u64).
     lia. }
 
-  Intros acc_s2_1a.
-  rename H into Hacc_s2_1a.
-
   (* _t'18 = m5 *)
   forward.
 
   (* muladd(&acc__1, m5, N_C_0) *)
-  forward_call (v_acc__1, acc_s2_1a, m5_u64,
-                mkUInt64 N_C_0 N_C_0_range, Tsh).
+  forward_call_muladd v_acc__1 acc_s2_1a m5_u64
+                (mkUInt64 N_C_0 N_C_0_range) acc_s2_1b Hacc_s2_1b.
   { (* carry_s2_0 + m1 + m5*NC0 < 2^192 *)
     rewrite Hacc_s2_1a.
     simpl u64_val.
@@ -741,15 +589,12 @@ Proof.
     pose proof (Hprod_NC0 (u64_val m5_u64) ltac:(lia)).
     lia. }
 
-  Intros acc_s2_1b.
-  rename H into Hacc_s2_1b.
-
   (* _t'17 = m4 *)
   forward.
 
   (* muladd(&acc__1, m4, N_C_1) *)
-  forward_call (v_acc__1, acc_s2_1b, m4_u64,
-                mkUInt64 N_C_1 N_C_1_range, Tsh).
+  forward_call_muladd v_acc__1 acc_s2_1b m4_u64
+                (mkUInt64 N_C_1 N_C_1_range) acc_s2_1 Hacc_s2_1.
   { (* carry_s2_0 + m1 + m5*NC0 + m4*NC1 < 2^192 *)
     rewrite Hacc_s2_1b, Hacc_s2_1a.
     simpl u64_val.
@@ -760,14 +605,8 @@ Proof.
     pose proof (Hprod_NC1 (u64_val m4_u64) ltac:(lia)).
     lia. }
 
-  Intros acc_s2_1.
-  rename H into Hacc_s2_1.
-  deadvars!.
-
   (* extract(&acc__1, &p1) *)
-  forward_call (v_acc__1, acc_s2_1, v_p1, Tsh, Tsh).
-
-  intro_extract p1_u64 carry_s2_1 Hp1_eq Hcarry_s2_1_eq.
+  forward_call_extract v_acc__1 acc_s2_1 v_p1 Tsh Tsh p1_u64 carry_s2_1 Hp1_eq Hcarry_s2_1_eq.
 
   assert (Hacc_s2_1_val : acc_val acc_s2_1 =
     acc_val carry_s2_0 + u64_val m1_u64 + u64_val m5_u64 * N_C_0 + u64_val m4_u64 * N_C_1)
@@ -794,15 +633,12 @@ Proof.
   forward.
 
   (* sumadd(&acc__1, m2) *)
-  forward_call (v_acc__1, carry_s2_1, m2_u64, Tsh).
+  forward_call_sumadd v_acc__1 carry_s2_1 m2_u64 acc_s2_2a Hacc_s2_2a.
   { (* carry_s2_1 + m2 < 2^192 *)
     pose proof (acc_range carry_s2_1).
     simpl u64_val.
     pose proof (u64_range m2_u64).
     lia. }
-
-  Intros acc_s2_2a.
-  rename H into Hacc_s2_2a.
 
   (* muladd(&acc__1, m6, N_C_0) -- m6 is uint32_t, widened to uint64 *)
   set (m6_val := limb64 (acc_val carry_s1_5) 0).
@@ -824,8 +660,8 @@ Proof.
         [apply Z.mul_le_mono_nonneg_r; lia | exact HNC1_prod_bound]).
 
   (* muladd(&acc__1, m6, N_C_0) -- m6 is uint32_t, auto-widened *)
-  forward_call (v_acc__1, acc_s2_2a, m6_u64,
-                mkUInt64 N_C_0 N_C_0_range, Tsh).
+  forward_call_muladd v_acc__1 acc_s2_2a m6_u64
+                (mkUInt64 N_C_0 N_C_0_range) acc_s2_2b Hacc_s2_2b.
   { entailer!.
     simpl firstn.
     do 2 f_equal.
@@ -841,15 +677,12 @@ Proof.
     pose proof Hm6_NC0.
     lia. }
 
-  Intros acc_s2_2b.
-  rename H into Hacc_s2_2b.
-
   (* _t'15 = m5 *)
   forward.
 
   (* muladd(&acc__1, m5, N_C_1) *)
-  forward_call (v_acc__1, acc_s2_2b, m5_u64,
-                mkUInt64 N_C_1 N_C_1_range, Tsh).
+  forward_call_muladd v_acc__1 acc_s2_2b m5_u64
+                (mkUInt64 N_C_1 N_C_1_range) acc_s2_2c Hacc_s2_2c.
   { (* carry_s2_1 + m2 + m6*NC0 + m5*NC1 < 2^192 *)
     rewrite Hacc_s2_2b, Hacc_s2_2a.
     unfold m6_u64.
@@ -860,14 +693,11 @@ Proof.
     pose proof (Hprod_NC1 (u64_val m5_u64) ltac:(lia)).
     lia. }
 
-  Intros acc_s2_2c.
-  rename H into Hacc_s2_2c.
-
   (* _t'14 = m4 *)
   forward.
 
   (* sumadd(&acc__1, m4) *)
-  forward_call (v_acc__1, acc_s2_2c, m4_u64, Tsh).
+  forward_call_sumadd v_acc__1 acc_s2_2c m4_u64 acc_s2_2 Hacc_s2_2.
   { (* carry_s2_1 + m2 + m6*NC0 + m5*NC1 + m4 < 2^192 *)
     rewrite Hacc_s2_2c, Hacc_s2_2b, Hacc_s2_2a.
     unfold m6_u64.
@@ -879,14 +709,8 @@ Proof.
     pose proof (Hprod_NC1 (u64_val m5_u64) ltac:(lia)).
     lia. }
 
-  Intros acc_s2_2.
-  rename H into Hacc_s2_2.
-  deadvars!.
-
   (* extract(&acc__1, &p2) *)
-  forward_call (v_acc__1, acc_s2_2, v_p2, Tsh, Tsh).
-
-  intro_extract p2_u64 carry_s2_2 Hp2_eq Hcarry_s2_2_eq.
+  forward_call_extract v_acc__1 acc_s2_2 v_p2 Tsh Tsh p2_u64 carry_s2_2 Hp2_eq Hcarry_s2_2_eq.
 
   assert (Hacc_s2_2_val : acc_val acc_s2_2 =
     acc_val carry_s2_1 + u64_val m2_u64 + m6_val * N_C_0 + u64_val m5_u64 * N_C_1 + u64_val m4_u64)
@@ -916,18 +740,15 @@ Proof.
   forward.
 
   (* sumadd_fast(&acc__1, m3) *)
-  forward_call (v_acc__1, carry_s2_2, m3_u64, Tsh).
+  forward_call_sumadd_fast v_acc__1 carry_s2_2 m3_u64 acc_s2_3a Hacc_s2_3a.
   { (* carry_s2_2 + m3 < 2^128 *)
     simpl u64_val.
     pose proof (u64_range m3_u64).
     lia. }
 
-  Intros acc_s2_3a.
-  rename H into Hacc_s2_3a.
-
   (* muladd_fast(&acc__1, m6, N_C_1) -- m6 is uint32, auto-widened *)
-  forward_call (v_acc__1, acc_s2_3a, m6_u64,
-                mkUInt64 N_C_1 N_C_1_range, Tsh).
+  forward_call_muladd_fast v_acc__1 acc_s2_3a m6_u64
+                (mkUInt64 N_C_1 N_C_1_range) acc_s2_3b Hacc_s2_3b.
   { entailer!.
     simpl firstn.
     do 2 f_equal.
@@ -942,14 +763,11 @@ Proof.
     pose proof Hm6_NC1.
     lia. }
 
-  Intros acc_s2_3b.
-  rename H into Hacc_s2_3b.
-
   (* _t'12 = m5 *)
   forward.
 
   (* sumadd_fast(&acc__1, m5) *)
-  forward_call (v_acc__1, acc_s2_3b, m5_u64, Tsh).
+  forward_call_sumadd_fast v_acc__1 acc_s2_3b m5_u64 acc_s2_3 Hacc_s2_3.
   { (* carry_s2_2 + m3 + m6*NC1 + m5 < 2^128 *)
     rewrite Hacc_s2_3b, Hacc_s2_3a.
     unfold m6_u64.
@@ -959,11 +777,8 @@ Proof.
     pose proof Hm6_NC1.
     lia. }
 
-  Intros acc_s2_3.
-  rename H into Hacc_s2_3.
-
   (* extract_fast(&acc__1, &p3) *)
-  forward_call (v_acc__1, acc_s2_3, v_p3, Tsh, Tsh).
+  forward_call_extract_fast v_acc__1 acc_s2_3 v_p3 Tsh Tsh p3_u64 carry_s2_3 Hp3_eq Hcarry_s2_3_eq.
   { (* carry_s2_2 + m3 + m6*NC1 + m5 < 2^128 *)
     rewrite Hacc_s2_3, Hacc_s2_3b, Hacc_s2_3a.
     unfold m6_u64.
@@ -972,8 +787,6 @@ Proof.
     pose proof (u64_range m5_u64).
     pose proof Hm6_NC1.
     lia. }
-
-  intro_extract p3_u64 carry_s2_3 Hp3_eq Hcarry_s2_3_eq.
 
   assert (Hacc_s2_3_val : acc_val acc_s2_3 =
     acc_val carry_s2_2 + u64_val m3_u64 + m6_val * N_C_1 + u64_val m5_u64)
@@ -1108,15 +921,11 @@ Proof.
   forward.
 
   (* secp256k1_u128_from_u64(&c128, p0) *)
-  forward_call (v_c128, p0_u64, Tsh).
-  Intros c128_0.
-  rename H into Hc128_0.
+  forward_call_u128_from_u64 v_c128 p0_u64 Tsh c128_0 Hc128_0.
 
   (* secp256k1_u128_accum_mul(&c128, N_C_0, p4) -- p4 is uint32, needs cast *)
-  forward_call (v_c128, c128_0,
-                mkUInt64 N_C_0 N_C_0_range,
-                p4_u64,
-                Tsh).
+  forward_call_u128_accum_mul v_c128 c128_0
+                (mkUInt64 N_C_0 N_C_0_range) p4_u64 Tsh c128_0a Hc128_0a.
   { entailer!.
     unfold uint64_to_val, p4_u64.
     simpl u64_val.
@@ -1140,20 +949,12 @@ Proof.
     simpl u64_val in *.
     nia. }
 
-  Intros c128_0a.
-  rename H into Hc128_0a.
-
   (* r->d[0] = secp256k1_u128_to_u64(&c128) *)
-  forward_call (v_c128, c128_0a, Tsh).
-  Intros lo0.
-  rename H into Hlo0.
+  forward_call_u128_to_u64 v_c128 c128_0a Tsh lo0 Hlo0.
   forward. (* r->d[0] = lo0 *)
 
   (* secp256k1_u128_rshift(&c128, 64) *)
-  forward_call (v_c128, c128_0a, 64, Tsh).
-  Intros carry_0.
-  rename H into Hcarry_0.
-  deadvars!.
+  forward_call_u128_rshift v_c128 c128_0a Tsh carry_0 Hcarry_0.
 
   (* Clean u128 value for final mod proof *)
   assert (Hc128_0a_val : u128_val c128_0a = u64_val p0_u64 + N_C_0 * p4_val)
@@ -1168,7 +969,7 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&c128, p1) *)
-  forward_call (v_c128, carry_0, p1_u64, Tsh).
+  forward_call_u128_accum_u64 v_c128 carry_0 p1_u64 Tsh c128_1a Hc128_1a.
   { (* carry_0 + p1 < 2^128 *)
     rewrite Hcarry_0_val.
     pose proof (u128_range c128_0a).
@@ -1177,12 +978,9 @@ Proof.
     pose proof (u64_range p1_u64).
     lia. }
 
-  Intros c128_1a.
-  rename H into Hc128_1a.
-
   (* secp256k1_u128_accum_mul(&c128, N_C_1, p4) *)
-  forward_call (v_c128, c128_1a,
-                mkUInt64 N_C_1 N_C_1_range, p4_u64, Tsh).
+  forward_call_u128_accum_mul v_c128 c128_1a
+                (mkUInt64 N_C_1 N_C_1_range) p4_u64 Tsh c128_1 Hc128_1.
   { entailer!.
     unfold uint64_to_val, p4_u64.
     simpl u64_val.
@@ -1208,20 +1006,12 @@ Proof.
     pose proof HNC1_prod_bound.
     lia. }
 
-  Intros c128_1.
-  rename H into Hc128_1.
-
   (* r->d[1] = secp256k1_u128_to_u64(&c128) *)
-  forward_call (v_c128, c128_1, Tsh).
-  Intros lo1.
-  rename H into Hlo1.
+  forward_call_u128_to_u64 v_c128 c128_1 Tsh lo1 Hlo1.
   forward. (* r->d[1] = lo1 *)
 
   (* secp256k1_u128_rshift(&c128, 64) *)
-  forward_call (v_c128, c128_1, 64, Tsh).
-  Intros carry_1.
-  rename H into Hcarry_1.
-  deadvars!.
+  forward_call_u128_rshift v_c128 c128_1 Tsh carry_1 Hcarry_1.
 
   assert (Hc128_1_val : u128_val c128_1 = u128_val c128_0a / 2^64 + u64_val p1_u64 + N_C_1 * p4_val)
     by (rewrite Hc128_1, Hc128_1a, Hcarry_0_val; simpl u64_val; ring).
@@ -1235,7 +1025,7 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&c128, p2) *)
-  forward_call (v_c128, carry_1, p2_u64, Tsh).
+  forward_call_u128_accum_u64 v_c128 carry_1 p2_u64 Tsh c128_2a Hc128_2a.
   { (* carry_1 + p2 < 2^128 *)
     rewrite Hcarry_1_val.
     pose proof (u128_range c128_1).
@@ -1244,11 +1034,8 @@ Proof.
       by (apply Z.div_lt_upper_bound; lia).
     lia. }
 
-  Intros c128_2a.
-  rename H into Hc128_2a.
-
   (* secp256k1_u128_accum_u64(&c128, p4) -- N_C_2 = 1, so p4*N_C_2 = p4 *)
-  forward_call (v_c128, c128_2a, p4_u64, Tsh).
+  forward_call_u128_accum_u64 v_c128 c128_2a p4_u64 Tsh c128_2 Hc128_2.
   { entailer!.
     unfold uint64_to_val, p4_u64.
     simpl u64_val.
@@ -1270,20 +1057,13 @@ Proof.
     assert (u128_val c128_1 / 2 ^ 64 < 2 ^ 64)
       by (apply Z.div_lt_upper_bound; lia).
     lia. }
-  Intros c128_2.
-  rename H into Hc128_2.
 
   (* r->d[2] = secp256k1_u128_to_u64(&c128) *)
-  forward_call (v_c128, c128_2, Tsh).
-  Intros lo2.
-  rename H into Hlo2.
+  forward_call_u128_to_u64 v_c128 c128_2 Tsh lo2 Hlo2.
   forward. (* r->d[2] = lo2 *)
 
   (* secp256k1_u128_rshift(&c128, 64) *)
-  forward_call (v_c128, c128_2, 64, Tsh).
-  Intros carry_2.
-  rename H into Hcarry_2.
-  deadvars!.
+  forward_call_u128_rshift v_c128 c128_2 Tsh carry_2 Hcarry_2.
 
   assert (Hc128_2_val : u128_val c128_2 = u128_val c128_1 / 2^64 + u64_val p2_u64 + p4_val)
     by (rewrite Hc128_2, Hc128_2a, Hcarry_1_val; simpl u64_val; ring).
@@ -1297,7 +1077,7 @@ Proof.
   forward.
 
   (* secp256k1_u128_accum_u64(&c128, p3) *)
-  forward_call (v_c128, carry_2, p3_u64, Tsh).
+  forward_call_u128_accum_u64 v_c128 carry_2 p3_u64 Tsh c128_3 Hc128_3.
   { (* carry_2 + p3 < 2^128 *)
     rewrite Hcarry_2_val.
     pose proof (u128_range c128_2).
@@ -1306,20 +1086,12 @@ Proof.
       by (apply Z.div_lt_upper_bound; lia).
     lia. }
 
-  Intros c128_3.
-  rename H into Hc128_3.
-
   (* r->d[3] = secp256k1_u128_to_u64(&c128) *)
-  forward_call (v_c128, c128_3, Tsh).
-  Intros lo3.
-  rename H into Hlo3.
+  forward_call_u128_to_u64 v_c128 c128_3 Tsh lo3 Hlo3.
   forward. (* r->d[3] = lo3 *)
 
   (* _t'5 = secp256k1_u128_hi_u64(&c128); _c = _t'5 *)
-  forward_call (v_c128, c128_3, Tsh).
-  Intros hi.
-  rename H into Hhi.
-  deadvars!.
+  forward_call_u128_hi_u64 v_c128 c128_3 Tsh hi Hhi.
 
   assert (Hc128_3_val : u128_val c128_3 = u128_val c128_2 / 2^64 + u64_val p3_u64)
     by (rewrite Hc128_3, Hcarry_2_val; ring).
@@ -1359,7 +1131,7 @@ Proof.
   clear Hr_eq.
 
   (* _t'6 = secp256k1_scalar_check_overflow(r) *)
-  forward_call (r_ptr, r_u256, sh_r).
+  forward_call_scalar_check_overflow r_ptr r_u256 sh_r.
 
   (* secp256k1_scalar_reduce(r, (uint)(c + _t'6)) *)
   set (ov := u64_val hi + (if Z_lt_dec (u256_val r_u256) secp256k1_N then 0 else 1)).
@@ -1408,9 +1180,9 @@ Proof.
         < 2 * (2^64 * 2^64 * 2^64 * 2^64)).
     { assert (p4_val * (N_C_0 + N_C_1 * 2^64 + N_C_2 * (2^64 * 2^64))
               <= 3 * (N_C_0 + N_C_1 * 2^64 + N_C_2 * (2^64 * 2^64)))
-        by (apply Z.mul_le_mono_nonneg_r; [unfold N_C_0, N_C_1, N_C_2; lia|lia]).
+        by (apply Z.mul_le_mono_nonneg_r; rep_lia).
       assert (0 <= p4_val * (N_C_0 + N_C_1 * 2^64 + N_C_2 * (2^64 * 2^64)))
-        by (apply Z.mul_nonneg_nonneg; [lia|unfold N_C_0, N_C_1, N_C_2; lia]).
+        by (apply Z.mul_nonneg_nonneg; rep_lia).
       unfold N_C_0, N_C_1, N_C_2 in *.
       lia. }
 
@@ -1418,7 +1190,7 @@ Proof.
       (u64_val p0_u64) (u64_val p1_u64) (u64_val p2_u64) (u64_val p3_u64)
       N_C_0 N_C_1 N_C_2 p4_val
       ltac:(lia) (u64_range p0_u64) (u64_range p1_u64) (u64_range p2_u64) (u64_range p3_u64)
-      ltac:(unfold N_C_0; lia) ltac:(unfold N_C_1; lia) ltac:(unfold N_C_2; lia)
+      ltac:(rep_lia) ltac:(rep_lia) ltac:(rep_lia)
       ltac:(lia)
       Hstage3_bound) as Hchain_raw.
     clear Hstage3_bound.
@@ -1473,7 +1245,7 @@ Proof.
       * unfold secp256k1_N; lia.
   }
 
-  forward_call (r_ptr, r_u256, ov, sh_r).
+  forward_call_scalar_reduce r_ptr r_u256 ov sh_r r_final Hr_final.
   { entailer!.
     simpl firstn.
     do 3 f_equal.
@@ -1488,9 +1260,9 @@ Proof.
   { (* 0 <= ov <= 2 *)
     change Int.max_unsigned with 4294967295 in Hp4_u32.
     assert (HNC0p4 : N_C_0 * p4_val <= N_C_0 * 4294967295)
-      by (apply Z.mul_le_mono_nonneg_l; [unfold N_C_0; lia | lia]).
+      by (apply Z.mul_le_mono_nonneg_l; [rep_lia | lia]).
     assert (HNC1p4 : N_C_1 * p4_val <= N_C_1 * 4294967295)
-      by (apply Z.mul_le_mono_nonneg_l; [unfold N_C_1; lia | lia]).
+      by (apply Z.mul_le_mono_nonneg_l; [rep_lia | lia]).
     assert (Hc0 : u128_val c128_0a / 2^64 <= 2147483648).
     { rewrite Hc128_0a_val.
       pose proof (u64_range p0_u64).
@@ -1520,7 +1292,6 @@ Proof.
 
   (* ===== Cleanup: provide witness and strip VST machinery ===== *)
 
-  Intros r_final.
   Exists (mkScalar (u512_val l mod secp256k1_N) ltac:(apply Z.mod_pos_bound; unfold secp256k1_N; lia)).
 
   change (field_at sh_l (tarray tulong 8) [] (uint512_to_val l) l_ptr)
@@ -1533,7 +1304,7 @@ Proof.
   f_equal.
 
   (* Remove all VST/pointer/bounds context -- keep only pure Z facts *)
-  clear - r_final H Hmod_eq.
+  clear - r_final Hr_final Hmod_eq.
 
   (* ===== Postcondition: u256_val r_final = u512_val l mod N ===== *)
 
@@ -1549,7 +1320,7 @@ Proof.
   rewrite Z.div_1_r.
   change (64 * 2) with (128).
   change (64 * 3) with (192).
-  rewrite H.
+  rewrite Hr_final.
   simpl u256_val.
   rewrite Hmod_eq.
   reflexivity.

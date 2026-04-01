@@ -42,6 +42,19 @@ Definition limb (B : Z) (x : Z) (i : nat) : Z :=
   (x / B ^ Z.of_nat i) mod B.
 
 (* ================================================================= *)
+(** ** Tactics *)
+(* ================================================================= *)
+
+(** Expand [B^k] to left-associated products [B * B * ... * B]. *)
+Ltac expand_pow B :=
+  try replace (B ^ 7) with (B * B * B * B * B * B * B) by ring;
+  try replace (B ^ 6) with (B * B * B * B * B * B) by ring;
+  try replace (B ^ 5) with (B * B * B * B * B) by ring;
+  try replace (B ^ 4) with (B * B * B * B) by ring;
+  try replace (B ^ 3) with (B * B * B) by ring;
+  try replace (B ^ 2) with (B * B) by ring.
+
+(* ================================================================= *)
 (** ** Reconstruction lemmas *)
 (* ================================================================= *)
 
@@ -59,9 +72,7 @@ Proof.
   simpl (Z.of_nat _).
   rewrite Z.pow_0_r, Z.pow_1_r, Z.div_1_r.
 
-  (* Normalize B^k to explicit products *)
-  replace (B ^ 2) with (B * B) by ring.
-  replace (B ^ 3) with (B * B * B) by ring.
+  expand_pow B.
 
   (* Name successive quotients q_k = q_{k-1} / B *)
   set (q0 := x / B).
@@ -159,13 +170,7 @@ Proof.
   simpl (Z.of_nat _).
   rewrite Z.pow_0_r, Z.pow_1_r, Z.div_1_r.
 
-  (* Normalize B^k to explicit products *)
-  replace (B ^ 2) with (B * B) by ring.
-  replace (B ^ 3) with (B * B * B) by ring.
-  replace (B ^ 4) with (B * B * B * B) by ring.
-  replace (B ^ 5) with (B * B * B * B * B) by ring.
-  replace (B ^ 6) with (B * B * B * B * B * B) by ring.
-  replace (B ^ 7) with (B * B * B * B * B * B * B) by ring.
+  expand_pow B.
 
   (* Name successive quotients q_k = q_{k-1} / B *)
   set (q0 := x / B).

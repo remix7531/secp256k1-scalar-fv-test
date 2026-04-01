@@ -4,9 +4,17 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Helper_verif.
+Require Import scalar_4x64.Helper_forward_call.
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
+
+(* Carry bound tactic: given [carry = acc / 2^64] and [acc = expr],
+   prove [carry <= num_ub / 2^64] by bounding the numerator. *)
+Local Ltac carry_bound Hcarry Hacc num_ub :=
+  rewrite Hcarry, Hacc;
+  apply (Z.le_trans _ (num_ub / 2^64));
+  [ apply Z.div_le_mono; lia | reflexivity ].
 
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
@@ -83,19 +91,20 @@ Proof.
   pose proof (Hprod_bound a3 b3) as Hab33.
   clear Hprod_bound.
 
+  (* Pre-split the uninitialized l8 array into 8 individual slots.
+     This lets each extract call find its target via cancel. *)
+  sep_apply (unfold_data_at__tulong_8 sh_l l8_ptr Hfc).
+  Intros.
+
   (* ===== Round 0: l8[0] = a0*b0 (1 product, uses muladd_fast + extract_fast) ===== *)
 
   forward. (* a0 = a->d[0] *)
   forward. (* b0 = b->d[0] *)
 
   (* muladd_fast(&acc, a0, b0) *)
-  forward_call (v_acc, acc_init, a0, b0, Tsh).
+  forward_call_muladd_fast v_acc acc_init a0 b0 acc0 Hacc0_post.
   { (* overflow: 0 + a0*b0 < 2^128 *)
     apply mul_u64_lt_u128; lia. }
-
-  (* Intro the accumulator after muladd_fast *)
-  Intros acc0.
-  rename H into Hacc0_post. (* acc_val acc0 = acc_val acc_init + a0*b0 *)
 
   (* Track acc_val through round 0 *)
   assert (Hacc0 : acc_val acc0 = u64_val a0 * u64_val b0).
@@ -105,9 +114,9 @@ Proof.
   clear Hacc0_post.
 
   (* extract_fast(&acc, &l8[0]) -- precondition: acc < 2^128 *)
-  forward_call (v_acc, acc0,
-                field_address (tarray tulong 8) [ArraySubsc 0] l8_ptr,
-                Tsh, sh_l).
+  forward_call_extract_fast v_acc acc0
+    (field_address (tarray tulong 8) [ArraySubsc 0] l8_ptr)
+    Tsh sh_l r0 carry0 Hr0_eq Hcarry0_eq.
   { (* parameter matching *)
     entailer!.
     simpl firstn.
@@ -115,52 +124,21 @@ Proof.
     rewrite field_address_offset by auto with field_compatible.
     simpl nested_field_offset.
     rewrite isptr_offset_val_zero; auto. }
-  { (* frame: split l8[0] out of the 8-element array *)
-    rewrite (arr_field_address tulong 8 l8_ptr 0 Hfc) by lia.
-    simpl Z.mul.
-    rewrite isptr_offset_val_zero by (eapply field_compatible_isptr; eauto).
-    rewrite (split2_data_at__Tarray_app 1 8 sh_l tulong l8_ptr) by lia.
-    rewrite data__at_singleton_array_eq.
-    cancel. }
 
-  (* Intro extracted limb and shifted accumulator *)
-  Intros vret.
-  rename H into Hr0_eq.     (* r0 = acc_lo acc0 *)
-  rename H0 into Hcarry0_eq.  (* acc_val carry0 = acc_val acc0 / 2^64 *)
-  destruct vret as [r0 carry0].
-  simpl fst in *.
-  simpl snd in *.
-  deadvars!.
-
-  (* Carry bound: acc_val carry0 <= 2^64 - 2 *)
-  assert (Hcarry0_ub : acc_val carry0 <= 2^64 - 2).
-  { rewrite Hcarry0_eq, Hacc0.
-    apply (Z.le_trans _ (((2^64 - 1) * (2^64 - 1)) / 2^64)).
-    - apply Z.div_le_mono.
-      all: lia.
-    - reflexivity. }
+  assert (Hcarry0_ub : acc_val carry0 <= 2^64 - 2)
+    by (carry_bound Hcarry0_eq Hacc0 ((2^64 - 1) * (2^64 - 1))).
 
   (* ===== Round 1: l8[1] = a0*b1 + a1*b0 (2 products, uses muladd + extract) ===== *)
 
   forward. (* a0 = a->d[0] *)
   forward. (* b1 = b->d[1] *)
 
-  (* muladd(&acc, a0, b1) *)
-  forward_call (v_acc, carry0, a0, b1, Tsh).
-
-  Intros acc1a.
-  rename H into Hacc1a_eq.
-  deadvars!.
+  forward_call_muladd v_acc carry0 a0 b1 acc1a Hacc1a_eq.
 
   forward. (* a1 = a->d[1] *)
   forward. (* b0 = b->d[0] *)
 
-  (* muladd(&acc, a1, b0) *)
-  forward_call (v_acc, acc1a, a1, b0, Tsh).
-
-  Intros acc1.
-  rename H into Hacc1_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc1a a1 b0 acc1 Hacc1_eq.
 
   (* Full chain for round 1 *)
   assert (Hacc1 : acc_val acc1 =
@@ -169,27 +147,12 @@ Proof.
     reflexivity. }
 
   (* extract(&acc, &l8[1]) *)
-  forward_call (v_acc, acc1,
-                field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: extract l8[1] from the 7-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 1 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
+  forward_call_extract v_acc acc1
+    (field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr)
+    Tsh sh_l r1 carry1 Hr1_eq Hcarry1_eq.
 
-  (* Intro extracted limb and shifted accumulator for round 1 *)
-  Intros vret1.
-  rename H into Hr1_eq.
-  rename H0 into Hcarry1_eq.
-  destruct vret1 as [r1 carry1].
-  simpl fst in *.
-  simpl snd in *.
-
-  (* Carry bound: acc_val carry1 <= 2 * 2^64 - 3 *)
-  assert (Hcarry1_ub : acc_val carry1 <= 2 * 2^64 - 3).
-  { rewrite Hcarry1_eq, Hacc1.
-    apply (Z.le_trans _ (((2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
-    - apply Z.div_le_mono; lia.
-    - reflexivity. }
+  assert (Hcarry1_ub : acc_val carry1 <= 2 * 2^64 - 3)
+    by (carry_bound Hcarry1_eq Hacc1 ((2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1)))).
 
   (* ===== Round 2: l8[2] = a0*b2 + a1*b1 + a2*b0 (3 products) ===== *)
 
@@ -197,31 +160,19 @@ Proof.
   forward. (* b2 = b->d[2] *)
 
   (* muladd(&acc, a0, b2) *)
-  forward_call (v_acc, carry1, a0, b2, Tsh).
-
-  Intros acc2a.
-  rename H into Hacc2a_eq.
-  deadvars!.
+  forward_call_muladd v_acc carry1 a0 b2 acc2a Hacc2a_eq.
 
   forward. (* a1 = a->d[1] *)
   forward. (* b1 = b->d[1] *)
 
   (* muladd(&acc, a1, b1) *)
-  forward_call (v_acc, acc2a, a1, b1, Tsh).
-
-  Intros acc2b.
-  rename H into Hacc2b_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc2a a1 b1 acc2b Hacc2b_eq.
 
   forward. (* a2 = a->d[2] *)
   forward. (* b0 = b->d[0] *)
 
   (* muladd(&acc, a2, b0) *)
-  forward_call (v_acc, acc2b, a2, b0, Tsh).
-
-  Intros acc2.
-  rename H into Hacc2_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc2b a2 b0 acc2 Hacc2_eq.
 
   (* Full chain for round 2 *)
   assert (Hacc2 : acc_val acc2 =
@@ -230,27 +181,12 @@ Proof.
     lia. }
 
   (* extract(&acc, &l8[2]) *)
-  forward_call (v_acc, acc2,
-                field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: peel l8[2] out of the 6-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 2 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
+  forward_call_extract v_acc acc2
+    (field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr)
+    Tsh sh_l r2 carry2 Hr2_eq Hcarry2_eq.
 
-  (* Intro extracted limb and shifted accumulator for round 2 *)
-  Intros vret2.
-  rename H into Hr2_eq.
-  rename H0 into Hcarry2_eq.
-  destruct vret2 as [r2 carry2].
-  simpl fst in *.
-  simpl snd in *.
-
-  (* Carry bound: acc_val carry2 <= 3 * 2^64 - 4 *)
-  assert (Hcarry2_ub : acc_val carry2 <= 3 * 2^64 - 4).
-  { rewrite Hcarry2_eq, Hacc2.
-    apply (Z.le_trans _ (((2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
-    - apply Z.div_le_mono; lia.
-    - reflexivity. }
+  assert (Hcarry2_ub : acc_val carry2 <= 3 * 2^64 - 4)
+    by (carry_bound Hcarry2_eq Hacc2 ((2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1)))).
 
   (* ===== Round 3: l8[3] = a0*b3 + a1*b2 + a2*b1 + a3*b0 (4 products) ===== *)
 
@@ -258,41 +194,25 @@ Proof.
   forward. (* b3 = b->d[3] *)
 
   (* muladd(&acc, a0, b3) *)
-  forward_call (v_acc, carry2, a0, b3, Tsh).
-
-  Intros acc3a.
-  rename H into Hacc3a_eq.
-  deadvars!.
+  forward_call_muladd v_acc carry2 a0 b3 acc3a Hacc3a_eq.
 
   forward. (* a1 = a->d[1] *)
   forward. (* b2 = b->d[2] *)
 
   (* muladd(&acc, a1, b2) *)
-  forward_call (v_acc, acc3a, a1, b2, Tsh).
-
-  Intros acc3b.
-  rename H into Hacc3b_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc3a a1 b2 acc3b Hacc3b_eq.
 
   forward. (* a2 = a->d[2] *)
   forward. (* b1 = b->d[1] *)
 
   (* muladd(&acc, a2, b1) *)
-  forward_call (v_acc, acc3b, a2, b1, Tsh).
-
-  Intros acc3c.
-  rename H into Hacc3c_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc3b a2 b1 acc3c Hacc3c_eq.
 
   forward. (* a3 = a->d[3] *)
   forward. (* b0 = b->d[0] *)
 
   (* muladd(&acc, a3, b0) *)
-  forward_call (v_acc, acc3c, a3, b0, Tsh).
-
-  Intros acc3.
-  rename H into Hacc3_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc3c a3 b0 acc3 Hacc3_eq.
 
   (* Full chain for round 3 *)
   assert (Hacc3 : acc_val acc3 =
@@ -302,27 +222,12 @@ Proof.
     lia. }
 
   (* extract(&acc, &l8[3]) *)
-  forward_call (v_acc, acc3,
-                field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: peel l8[3] out of the 5-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 3 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
+  forward_call_extract v_acc acc3
+    (field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr)
+    Tsh sh_l r3 carry3 Hr3_eq Hcarry3_eq.
 
-  (* Intro extracted limb and shifted accumulator for round 3 *)
-  Intros vret3.
-  rename H into Hr3_eq.
-  rename H0 into Hcarry3_eq.
-  destruct vret3 as [r3 carry3].
-  simpl fst in *.
-  simpl snd in *.
-
-  (* Carry bound: acc_val carry3 <= 4 * 2^64 - 5 *)
-  assert (Hcarry3_ub : acc_val carry3 <= 4 * 2^64 - 5).
-  { rewrite Hcarry3_eq, Hacc3.
-    apply (Z.le_trans _ (((3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
-    - apply Z.div_le_mono; lia.
-    - reflexivity. }
+  assert (Hcarry3_ub : acc_val carry3 <= 4 * 2^64 - 5)
+    by (carry_bound Hcarry3_eq Hacc3 ((3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1)))).
 
   (* ===== Round 4: l8[4] = a1*b3 + a2*b2 + a3*b1 (3 products) ===== *)
 
@@ -330,31 +235,19 @@ Proof.
   forward. (* b3 = b->d[3] *)
 
   (* muladd(&acc, a1, b3) *)
-  forward_call (v_acc, carry3, a1, b3, Tsh).
-
-  Intros acc4a.
-  rename H into Hacc4a_eq.
-  deadvars!.
+  forward_call_muladd v_acc carry3 a1 b3 acc4a Hacc4a_eq.
 
   forward. (* a2 = a->d[2] *)
   forward. (* b2 = b->d[2] *)
 
   (* muladd(&acc, a2, b2) *)
-  forward_call (v_acc, acc4a, a2, b2, Tsh).
-
-  Intros acc4b.
-  rename H into Hacc4b_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc4a a2 b2 acc4b Hacc4b_eq.
 
   forward. (* a3 = a->d[3] *)
   forward. (* b1 = b->d[1] *)
 
   (* muladd(&acc, a3, b1) *)
-  forward_call (v_acc, acc4b, a3, b1, Tsh).
-
-  Intros acc4.
-  rename H into Hacc4_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc4b a3 b1 acc4 Hacc4_eq.
 
   (* Full chain for round 4 *)
   assert (Hacc4 : acc_val acc4 =
@@ -363,27 +256,12 @@ Proof.
   { rewrite Hacc4_eq, Hacc4b_eq, Hacc4a_eq. lia. }
 
   (* extract(&acc, &l8[4]) *)
-  forward_call (v_acc, acc4,
-                field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: peel l8[4] out of the 4-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 4 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
+  forward_call_extract v_acc acc4
+    (field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr)
+    Tsh sh_l r4 carry4 Hr4_eq Hcarry4_eq.
 
-  (* Intro extracted limb and shifted accumulator for round 4 *)
-  Intros vret4.
-  rename H into Hr4_eq.
-  rename H0 into Hcarry4_eq.
-  destruct vret4 as [r4 carry4].
-  simpl fst in *.
-  simpl snd in *.
-
-  (* Carry bound: acc_val carry4 <= 3 * 2^64 - 3 *)
-  assert (Hcarry4_ub : acc_val carry4 <= 3 * 2^64 - 3).
-  { rewrite Hcarry4_eq, Hacc4.
-    apply (Z.le_trans _ (((4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
-    - apply Z.div_le_mono; lia.
-    - reflexivity. }
+  assert (Hcarry4_ub : acc_val carry4 <= 3 * 2^64 - 3)
+    by (carry_bound Hcarry4_eq Hacc4 ((4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1)))).
 
   (* ===== Round 5: l8[5] = a2*b3 + a3*b2 (2 products) ===== *)
 
@@ -391,21 +269,13 @@ Proof.
   forward. (* b3 = b->d[3] *)
 
   (* muladd(&acc, a2, b3) *)
-  forward_call (v_acc, carry4, a2, b3, Tsh).
-
-  Intros acc5a.
-  rename H into Hacc5a_eq.
-  deadvars!.
+  forward_call_muladd v_acc carry4 a2 b3 acc5a Hacc5a_eq.
 
   forward. (* a3 = a->d[3] *)
   forward. (* b2 = b->d[2] *)
 
   (* muladd(&acc, a3, b2) *)
-  forward_call (v_acc, acc5a, a3, b2, Tsh).
-
-  Intros acc5.
-  rename H into Hacc5_eq.
-  deadvars!.
+  forward_call_muladd v_acc acc5a a3 b2 acc5 Hacc5_eq.
 
   (* Full chain for round 5 *)
   assert (Hacc5 : acc_val acc5 =
@@ -413,27 +283,12 @@ Proof.
   { rewrite Hacc5_eq, Hacc5a_eq. lia. }
 
   (* extract(&acc, &l8[5]) *)
-  forward_call (v_acc, acc5,
-                field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: peel l8[5] out of the 3-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 5 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
+  forward_call_extract v_acc acc5
+    (field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr)
+    Tsh sh_l r5 carry5 Hr5_eq Hcarry5_eq.
 
-  (* Intro extracted limb and shifted accumulator for round 5 *)
-  Intros vret5.
-  rename H into Hr5_eq.
-  rename H0 into Hcarry5_eq.
-  destruct vret5 as [r5 carry5].
-  simpl fst in *.
-  simpl snd in *.
-
-  (* Carry bound: acc_val carry5 <= 2 * 2^64 - 2 *)
-  assert (Hcarry5_ub : acc_val carry5 <= 2 * 2^64 - 2).
-  { rewrite Hcarry5_eq, Hacc5.
-    apply (Z.le_trans _ (((3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1))) / 2^64)).
-    - apply Z.div_le_mono; lia.
-    - reflexivity. }
+  assert (Hcarry5_ub : acc_val carry5 <= 2 * 2^64 - 2)
+    by (carry_bound Hcarry5_eq Hacc5 ((3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1)))).
 
   (* ===== Round 6: l8[6],l8[7] = a3*b3 (1 product, uses muladd_fast + extract_fast + store) ===== *)
 
@@ -441,40 +296,20 @@ Proof.
   forward. (* b3 = b->d[3] *)
 
   (* muladd_fast(&acc, a3, b3) -- precondition: acc + a3*b3 < 2^128 *)
-  forward_call (v_acc, carry5, a3, b3, Tsh).
-
-  Intros acc6.
-  rename H into Hacc6_eq.
-  deadvars!.
+  forward_call_muladd_fast v_acc carry5 a3 b3 acc6 Hacc6_eq.
 
   (* Full chain for round 6 *)
   assert (Hacc6 : acc_val acc6 = acc_val carry5 + u64_val a3 * u64_val b3).
   { exact Hacc6_eq. }
 
   (* extract_fast(&acc, &l8[6]) -- precondition: acc < 2^128 *)
-  forward_call (v_acc, acc6,
-                field_address (tarray tulong 8) [ArraySubsc 6] l8_ptr,
-                Tsh, sh_l).
-  { (* frame: peel l8[6] out of the 2-element sub-array *)
-    sep_apply (peel_array_slot sh_l l8_ptr 6 Hfc ltac:(lia) ltac:(lia)).
-    cancel. }
-
-  (* Intro extracted limb and shifted accumulator for round 6 *)
-  Intros vret6.
-  rename H into Hr6_eq.
-  rename H0 into Hcarry6_eq.
-  destruct vret6 as [r6 carry6].
-  simpl fst in *.
-  simpl snd in *.
+  forward_call_extract_fast v_acc acc6
+    (field_address (tarray tulong 8) [ArraySubsc 6] l8_ptr)
+    Tsh sh_l r6 carry6 Hr6_eq Hcarry6_eq.
 
   (* l8[7] = acc.c0: first read acc.c0 into temp *)
   forward.
   (* Now store to l8[7] *)
-  change (8 - 6 - 1) with 1.
-  change (6 + 1) with 7.
-  rewrite data__at_singleton_array_eq.
-  rewrite (arr_field_address0 tulong 8 l8_ptr 7 Hfc) by lia.
-  rewrite <- (arr_field_address tulong 8 l8_ptr 7 Hfc) by lia.
   change tulong with (nested_field_type (tarray tulong 8) (SUB 7)).
   rewrite <- field_at__data_at_.
   forward. (* l8[7] = acc.c0 *)

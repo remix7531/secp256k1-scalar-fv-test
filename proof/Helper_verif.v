@@ -9,6 +9,27 @@ Require Export scalar_4x64.Helper_array_fold.
 Require Export scalar_4x64.Helper_arithmetic.
 
 (* ================================================================= *)
+(** ** rep_lia hints for secp256k1 constants
+
+    Registering the N and N_C limb values with the [rep_lia] hint
+    database lets [rep_lia] expand these constants automatically,
+    replacing manual [unfold N_C_0; lia] patterns. *)
+
+Lemma N_C_0_eq : N_C_0 = 4624529908474429119. Proof. reflexivity. Qed.
+Lemma N_C_1_eq : N_C_1 = 4994812053365940164. Proof. reflexivity. Qed.
+Lemma N_C_2_eq : N_C_2 = 1. Proof. reflexivity. Qed.
+#[export] Hint Rewrite N_C_0_eq N_C_1_eq N_C_2_eq : rep_lia.
+
+(** Reduction rules for record projections.
+    These let [rep_lia] and VST's internal solvers see through
+    [mkUInt64]/[mkAcc] wrappers without manual [simpl]. *)
+Lemma u64_val_mk : forall z H, u64_val (mkUInt64 z H) = z.
+Proof. reflexivity. Qed.
+Lemma acc_val_mk : forall z H, acc_val (mkAcc z H) = z.
+Proof. reflexivity. Qed.
+#[export] Hint Rewrite u64_val_mk acc_val_mk : rep_lia.
+
+(* ================================================================= *)
 (** ** Inhabitant instances (needed by deadvars!) *)
 
 #[export] Instance Inhabitant_UInt64_ : Inhabitant UInt64 := mkUInt64 0 ltac:(lia).
@@ -384,82 +405,6 @@ Proof.
   reflexivity.
 Qed.
 
-(** Limb 2 for addition with a u64: [b < 2^64] so [limb64 b 1 = 0]. *)
-Lemma limb_add_2_u64 : forall a b,
-  0 <= a -> 0 <= b < 2^64 ->
-  (limb64 a 2 +
-    (if limb64 a 1 + (if limb64 a 0 + b <? 2^64 then 0 else 1) <? 2^64 then 0 else 1))
-  mod 2^64 = limb64 (a + b) 2.
-Proof.
-  intros a b Ha [Hb0 Hb1].
-
-  (* Setup: unfold limb64, introduce M = 2^64 *)
-  unfold limb64.
-  simpl Z.of_nat.
-  rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r, Z.mul_1_r.
-  replace (64 * 2) with (64 + 64) by lia.
-  rewrite Z.pow_add_r by lia.
-  set (M := (2^64)%Z).
-
-  (* b < M, so b / (M*M) = 0 and b mod (M*M) = b *)
-  assert (Hbdiv : b / (M * M) = 0) by (apply Z.div_small; unfold M; lia).
-  assert (Hb_mod : b mod (M * M) = b) by (apply Z.mod_small; unfold M; lia).
-
-  (* Decompose (a+b)/(M*M) via carry identity, cancel b/(M*M) = 0 *)
-  replace ((a + b) / (M * M))
-    with (a / (M * M) + b / (M * M) +
-          (a mod (M * M) + b mod (M * M)) / (M * M))
-    by (symmetry; apply Z_div_add_carry; [unfold M; lia | lia | lia]).
-  rewrite Hbdiv, Z.add_0_r.
-
-  (* Name the two limbs of a and establish ranges *)
-  set (la0 := a mod M).
-  set (la1 := a / M mod M).
-  assert (Hla0 : 0 <= la0 < M) by (unfold la0, M; apply Z.mod_pos_bound; lia).
-  assert (Hla1 : 0 <= la1 < M) by (unfold la1, M; apply Z.mod_pos_bound; lia).
-
-  (* Substitute b mod (M*M) = b, recombine a mod (M*M) *)
-  rewrite Hb_mod.
-  replace (a mod (M * M)) with (la0 + la1 * M)
-    by (unfold la0, la1, M; rewrite Zmod_recombine by lia; ring).
-
-  (* Define the carry from limb 0 *)
-  set (carry0 := if la0 + b <? M then 0 else 1).
-  assert (Hc0 : 0 <= carry0 <= 1)
-    by (unfold carry0; destruct (la0 + b <? M); lia).
-
-  (* Show the two-limb sum / (M*M) equals the carry expression *)
-  assert (Hcarry_val :
-    (la0 + la1 * M + b) / (M * M) =
-    if la1 + carry0 <? M then 0 else 1).
-  { unfold carry0.
-    destruct (la0 + b <? M) eqn:Ec0.
-    - (* no carry from limb 0 *)
-      apply Z.ltb_lt in Ec0.
-      destruct (la1 + 0 <? M) eqn:Ec1.
-      + apply Z.ltb_lt in Ec1.
-        replace (la1 + 0) with la1 by lia.
-        apply Z.div_small.
-        lia.
-      + apply Z.ltb_ge in Ec1.
-        lia.
-    - (* carry from limb 0 *)
-      apply Z.ltb_ge in Ec0.
-      destruct (la1 + 1 <? M) eqn:Ec1.
-      + apply Z.ltb_lt in Ec1.
-        apply Z.div_small.
-        lia.
-      + apply Z.ltb_ge in Ec1.
-        symmetry.
-        apply Z.div_unique
-          with (r := la0 + la1 * M + b - M * M); lia. }
-  rewrite Hcarry_val.
-
-  (* Final step: strip inner mod through outer mod *)
-  rewrite Zplus_mod_idemp_l.
-  reflexivity.
-Qed.
-
 (* ----------------------------------------------------------------- *)
 (** *** VST carry bridge lemmas
 
@@ -629,4 +574,116 @@ Proof.
   subst c0'.
   apply eqm_of_mod_eq.
   apply limb_add_2; nia.
+Qed.
+
+(* ----------------------------------------------------------------- *)
+(** *** sumadd carry bridge lemmas
+
+    Same idea as [muladd_limb1] / [muladd_limb2], but for adding a
+    plain u64 value [av] (rather than a product) to an accumulator.
+    Since [av < 2^64], its high limbs are 0, which simplifies the
+    carry chain.
+
+    Stated as [Int64.repr] equalities so that callers can [apply]
+    directly after [f_equal], without an intermediate [eqm] step. *)
+
+(** Bridge for sumadd limb 0. *)
+Lemma sumadd_limb0 : forall acc_v av,
+  0 <= acc_v -> 0 <= av < 2^64 ->
+  Int64.eqm (limb64 acc_v 0 + av) (limb64 (acc_v + av) 0).
+Proof.
+  intros.
+  apply eqm_of_mod_eq.
+  unfold limb64; simpl Z.of_nat;
+    rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r.
+  apply Zplus_mod_idemp_l.
+Qed.
+
+(** Bridge for sumadd limb 1: normalize [ltu] / [b2z] into
+    [limb_add_1] form.  The caller strips [Int.unsigned] or
+    [Int.signed] (one rewrite) before applying this lemma. *)
+Lemma sumadd_limb1 : forall acc_v av,
+  0 <= acc_v -> 0 <= av < 2^64 ->
+  Int64.eqm
+    (limb64 acc_v 1 +
+      Z.b2z (Int64.ltu
+        (Int64.repr (limb64 acc_v 0 + av))
+        (Int64.repr av)))
+    (limb64 (acc_v + av) 1).
+Proof.
+  intros acc_v av Hacc Hav.
+  pose proof (limb64_u64_range acc_v 0).
+
+  rewrite (ltu_carry_b2z (limb64 acc_v 0) av) by rep_lia.
+  change Int64.modulus with (2^64).
+
+  apply eqm_of_mod_eq.
+  assert (Hav0 : limb64 av 0 = av).
+  { unfold limb64. simpl Z.of_nat.
+    rewrite Z.mul_0_r, Z.pow_0_r, Z.div_1_r.
+    apply Z.mod_small. lia. }
+  assert (Hav1 : limb64 av 1 = 0)
+    by (apply limb64_high_zero; simpl Z.of_nat; lia).
+  transitivity ((limb64 acc_v 1 + (limb64 av 1 +
+    (if limb64 acc_v 0 + limb64 av 0 <? 2^64 then 0 else 1))) mod 2^64).
+  - f_equal. rewrite Hav0, Hav1. lia.
+  - apply limb_add_1; lia.
+Qed.
+
+(** Bridge for sumadd limb 2: normalize two levels of carry
+    (unsigned inner, signed outer) into [limb_add_2_u64] form. *)
+Lemma sumadd_limb2 : forall acc_v av,
+  0 <= acc_v -> 0 <= av < 2^64 ->
+  let c0_carry :=
+    Z.b2z (Int64.ltu
+      (Int64.repr (limb64 acc_v 0 + av))
+      (Int64.repr av)) in
+  let over := Int.unsigned (Int.repr c0_carry) in
+  Int64.eqm
+    (limb64 acc_v 2 +
+      Int.signed (Int.repr
+        (Z.b2z (Int64.ltu
+          (Int64.repr (limb64 acc_v 1 + over))
+          (Int64.repr over)))))
+    (limb64 (acc_v + av) 2).
+Proof.
+  intros acc_v av Hacc Hav c0_carry over.
+  pose proof (limb64_u64_range acc_v 0) as Hla0.
+  pose proof (limb64_u64_range acc_v 1) as Hla1.
+
+  subst c0_carry over.
+
+  (* Normalize inner (limb 0) carry *)
+  rewrite (ltu_carry_b2z (limb64 acc_v 0) av) by rep_lia.
+  set (c0' := if limb64 acc_v 0 + av <? Int64.modulus then 0 else 1).
+  assert (Hc0' : 0 <= c0' <= 1)
+    by (subst c0'; destruct (limb64 acc_v 0 + av <? Int64.modulus); lia).
+  assert (Hcu : Int.unsigned (Int.repr c0') = c0')
+    by (subst c0'; destruct (limb64 acc_v 0 + av <? Int64.modulus); reflexivity).
+  rewrite Hcu.
+
+  (* Normalize outer (limb 1) carry *)
+  rewrite (ltu_carry_b2z (limb64 acc_v 1) c0') by rep_lia.
+  assert (Hcs :
+    Int.signed (Int.repr
+      (if limb64 acc_v 1 + c0' <? Int64.modulus then 0 else 1))
+    = (if limb64 acc_v 1 + c0' <? Int64.modulus then 0 else 1))
+    by (destruct (limb64 acc_v 1 + c0' <? Int64.modulus); reflexivity).
+  rewrite Hcs.
+  change Int64.modulus with (2^64).
+
+  (* Derive from limb_add_2: substitute limb64 av 0 = av, limb64 av 1 = 0 *)
+  subst c0'.
+  apply eqm_of_mod_eq.
+  pose proof (limb_add_2 acc_v av Hacc ltac:(lia) ltac:(lia)) as H.
+  rewrite (limb64_high_zero av 0) in H by (simpl Z.of_nat; lia).
+  replace (limb64 av 0) with av in H
+    by (unfold limb64; simpl Z.of_nat;
+        rewrite Z.mul_0_r, Z.pow_0_r, Z.div_1_r;
+        symmetry; apply Z.mod_small; lia).
+  replace (limb64 acc_v 1 + 0 +
+    (if limb64 acc_v 0 + av <? 2 ^ 64 then 0 else 1))
+    with (limb64 acc_v 1 +
+    (if limb64 acc_v 0 + av <? 2 ^ 64 then 0 else 1)) in H by lia.
+  exact H.
 Qed.

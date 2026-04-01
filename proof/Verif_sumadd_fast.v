@@ -27,60 +27,20 @@ Proof.
 
   entailer!.
 
-  (* --- Postcondition: C struct = acc_to_val of mathematical sum --- *)
   apply derives_refl'.
   unfold acc_to_val.
   simpl.
   do 3 f_equal.
-
-  + (* limb 0: (limb64 acc 0 + u64_val a) mod 2^64 = limb64 (acc+a) 0 *)
-    apply Int64.eqm_samerepr.
-    unfold Int64.eqm, limb64.
-    simpl Z.of_nat.
-    rewrite Z.mul_0_r, Z.pow_0_r, !Z.div_1_r.
-    change Int64.modulus with (2^64).
-
-    (* u64_val a < 2^64, so mod is identity; then fold back *)
-    rewrite Z.add_mod by lia.
-    rewrite (Z.mod_small (u64_val a))
-      by (pose proof (u64_range a); lia).
-    apply Zbits.eqmod_mod.
-    lia.
-  + (* limb 1: ltu carry bridge -> limb_add_1 *)
-    f_equal.
-    apply Int64.eqm_samerepr.
-    pose proof (acc_range acc) as Hacc.
-    pose proof (u64_range a) as Ha.
-    pose proof (limb64_u64_range (acc_val acc) 0) as Hc0.
-
-    (* Int.signed (Int.repr (b2z ...)) = b2z ... *)
+  + apply Int64.eqm_samerepr.
+    apply sumadd_limb0; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+  + f_equal. apply Int64.eqm_samerepr.
     rewrite Int.signed_repr
       by (unfold Z.b2z; destruct (Int64.ltu _ _); rep_lia).
-
-    (* Normalize ltu/b2z to if-then-else carry *)
-    rewrite ltu_carry_b2z by rep_lia.
-    change Int64.modulus with (2^64).
-
-    (* Transitivity: rewrite u64_val a limbs, then apply limb_add_1 *)
-    apply Int64.eqm_trans
-      with (y := limb64 (acc_val acc) 1 +
-                 (limb64 (u64_val a) 1 +
-                  (if limb64 (acc_val acc) 0 + limb64 (u64_val a) 0 <? 2^64
-                   then 0 else 1))).
-    * (* limb64(u64_val a, 0) = u64_val a, limb64(u64_val a, 1) = 0 *)
-      rewrite limb64_u64_val_0, limb64_u64_val_1.
-      unfold Int64.eqm.
-      apply Zbits.eqmod_refl.
-    * (* Conclude via limb_add_1 *)
-      apply eqm_of_mod_eq. apply limb_add_1; lia.
+    apply sumadd_limb1; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
   + (* limb 2: acc + a < 2^128 so both sides are 0 *)
-    f_equal.
-    apply Int64.eqm_samerepr.
-    unfold limb64.
-    simpl Z.of_nat.
-    replace (64 * 2) with 128 by lia.
-    unfold Int64.eqm.
-    change Int64.modulus with (2^64).
+    f_equal. apply Int64.eqm_samerepr.
+    unfold limb64. simpl Z.of_nat. replace (64 * 2) with 128 by lia.
+    unfold Int64.eqm. change Int64.modulus with (2^64).
     rewrite !Z.div_small
       by (pose proof (acc_range acc); pose proof (u64_range a); lia).
     apply Zbits.eqmod_refl.

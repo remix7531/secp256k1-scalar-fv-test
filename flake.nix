@@ -1,19 +1,24 @@
 {
-  description = "secp256k1 scalar formal verification - Rocq + VST dev environment";
+  description = "secp256k1 scalar formal verification - Rocq + VST";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     flake-compat = {
       url = "github:NixOS/flake-compat";
       flake = false;
     };
+
+    # NOTE: pinned to the `feat/nix-flake` branch on the remix7531 fork while
+    # the Nix flake is in review upstream. Swap to
+    # `github:LLM4Rocq/rocq-mcp/<tag>` once the flake lands there.
+    rocq-mcp.url = "github:remix7531/rocq-mcp/feat/nix-flake";
+    rocq-mcp.inputs.flake-utils.follows = "flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils, flake-compat, ... }:
+  outputs = { self, nixpkgs, flake-utils, flake-compat, rocq-mcp, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        # CompCert has an unfree (INRIA) license.
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfreePredicate = pkg:
@@ -21,52 +26,34 @@
         };
 
         coqPkgs = pkgs.coqPackages_9_0;
-
-        # VST 2.16 — extends nixpkgs VST/default.nix with Rocq 9.0 support.
-        # Once merged upstream, replace with coqPkgs.VST.
-        vst = coqPkgs.callPackage ./.nix/vst.nix {};
-
-        rocq-mcp = pkgs.callPackage ./.nix/rocq-mcp.nix {};
-
       in {
         devShells.default = pkgs.mkShell {
           shellHook = ''
             unset COQPATH
           '';
-          packages = [
-            # Build tools & system libraries
-            pkgs.clang
-            pkgs.gcc
-            pkgs.which
-            pkgs.gmp
-            pkgs.gmp.dev
-            pkgs.gnumake
-            pkgs.m4
-            pkgs.pkg-config
-
-            # ATP/SMT solvers
-            pkgs.eprover
-            pkgs.vampire
-            pkgs.cvc4
-
-            # Rocq ecosystem (nixpkgs coqPackages_9_0)
-            coqPkgs.coq
-            coqPkgs.compcert
-            coqPkgs.flocq
-            coqPkgs.coq-hammer
-            coqPkgs.coq-lsp
-            vst
-
-            # Language server
-            pkgs.rocqPackages_9_0.vsrocq-language-server
-
-            # MCP server
-            rocq-mcp
+          packages = (with coqPkgs; [
+            VST
+            compcert
+            coq
+            coq-hammer
+            coq-lsp
+            flocq
+            vsrocq-language-server
+          ]) ++ (with pkgs; [
+            clang
+            cvc4
+            eprover
+            gcc
+            gmp
+            gmp.dev
+            gnumake
+            m4
+            pkg-config
+            vampire
+            which
+          ]) ++ [
+            rocq-mcp.packages.${system}.rocq-mcp
           ];
-        };
-
-        packages = {
-          inherit vst rocq-mcp;
         };
       });
 }

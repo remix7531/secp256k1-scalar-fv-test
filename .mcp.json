@@ -2,7 +2,12 @@
   "mcpServers": {
     "rocq": {
       "command": "rocq-mcp",
-      "type": "stdio"
+      "type": "stdio",
+      "env": {
+        "ROCQ_PET_TIMEOUT": "300",
+        "ROCQ_PET_TIMEOUT_GRACE": "60",
+        "ROCQ_MAX_STATES": "10000"
+      }
     }
   }
 }

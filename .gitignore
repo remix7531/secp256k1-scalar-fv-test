@@ -1,3 +1,6 @@
+*.md
+!README.md
+!STYLE.md
 !.vscode/
 *.glob
 *.o

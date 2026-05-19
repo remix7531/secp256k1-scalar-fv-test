@@ -125,22 +125,6 @@ Proof.
   reflexivity.
 Qed.
 
-(** Address arithmetic: [p + i] = field_address for tarray tulong 8. *)
-Lemma array_access_hint : forall (p : val) (i : Z),
-  field_compatible (tarray tulong 8) [] p ->
-  0 <= i < 8 ->
-  force_val (sem_add_ptr_int tulong Signed p (Vint (Int.repr i)))
-  = field_address (tarray tulong 8) (SUB i) p.
-Proof.
-  intros p i Hfc Hi.
-  rewrite arr_field_address by auto.
-  rewrite sem_add_pi'.
-  - reflexivity.
-  - auto.
-  - destruct Hfc; auto.
-  - rep_lia.
-Qed.
-
 (* ----------------------------------------------------------------- *)
 (** *** Main proof *)
 
@@ -195,33 +179,25 @@ Proof.
   assert (HNC0_prod_bound : (2^64 - 1) * N_C_0 < 2^127) by rep_lia.
   assert (HNC1_prod_bound : (2^64 - 1) * N_C_1 < 2^127) by rep_lia.
 
-  (* Convert data_at -> field_at for array element access *)
-  change (data_at sh_l (tarray tulong 8) (uint512_to_val l) l_ptr)
-    with (field_at sh_l (tarray tulong 8) [] (uint512_to_val l) l_ptr).
 
   (* ===== Load n0..n3 from l[4..7] ===== *)
 
   (* n0 = l[4] *)
-  pose proof (array_access_hint l_ptr 4 Hfc ltac:(lia)) as _.
   forward.
 
   (* n1 = l[5] *)
-  pose proof (array_access_hint l_ptr 5 Hfc ltac:(lia)) as _.
   forward.
 
   (* n2 = l[6] *)
-  pose proof (array_access_hint l_ptr 6 Hfc ltac:(lia)) as _.
   forward.
 
   (* n3 = l[7] *)
-  pose proof (array_access_hint l_ptr 7 Hfc ltac:(lia)) as _.
   forward.
 
   (* ===== Stage 1: Reduce 512 -> 385 bits ===== *)
   (* m[0..6] = l[0..3] + n[0..3] * SECP256K1_N_C *)
 
   (* _t'26 = l[0] *)
-  pose proof (array_access_hint l_ptr 0 Hfc ltac:(lia)) as _.
   forward.
 
   (* acc = { l[0], 0, 0 } *)
@@ -268,7 +244,6 @@ Proof.
   (* ===== Round 1: sumadd_fast(l[1]); muladd(n1,NC0); muladd(n0,NC1); extract -> m1 ===== *)
 
   (* _t'25 = l[1] *)
-  pose proof (array_access_hint l_ptr 1 Hfc ltac:(lia)) as _.
   forward.
 
   (* sumadd_fast(&acc, l[1]) *)
@@ -304,7 +279,6 @@ Proof.
   (* ===== Round 2: sumadd(l[2]); muladd(n2,NC0); muladd(n1,NC1); sumadd(n0); extract -> m2 ===== *)
 
   (* _t'24 = l[2] *)
-  pose proof (array_access_hint l_ptr 2 Hfc ltac:(lia)) as _.
   forward.
 
   (* sumadd(&acc, l[2]) *)
@@ -344,7 +318,6 @@ Proof.
   (* ===== Round 3: sumadd(l[3]); muladd(n3,NC0); muladd(n2,NC1); sumadd(n1); extract -> m3 ===== *)
 
   (* _t'23 = l[3] *)
-  pose proof (array_access_hint l_ptr 3 Hfc ltac:(lia)) as _.
   forward.
 
   (* sumadd(&acc, l[3]) *)
@@ -1293,9 +1266,6 @@ Proof.
   (* ===== Cleanup: provide witness and strip VST machinery ===== *)
 
   Exists (mkScalar (u512_val l mod secp256k1_N) ltac:(apply Z.mod_pos_bound; unfold secp256k1_N; lia)).
-
-  change (field_at sh_l (tarray tulong 8) [] (uint512_to_val l) l_ptr)
-    with (data_at sh_l (tarray tulong 8) (uint512_to_val l) l_ptr).
 
   entailer!.
 

@@ -320,15 +320,9 @@ Proof.
   Exists (mul_256 a b).
   entailer!.
 
-  (* Normalize types: nested_field_type (tarray tulong 8) (SUB 7) = tulong *)
-  change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong in *.
-  change (tarray tulong 8) with (tarray tulong 8) in *.
-
-  (* Convert field_at for l8[7] into data_at *)
+  (* Convert field_at for l8[7] back into data_at, and normalize the value. *)
   rewrite (field_at_data_at sh_l (tarray tulong 8) (SUB 7)) by reflexivity.
-  change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong.
-
-  (* Normalize l8[7] value to uint64_to_val form *)
+  change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong in *.
   change (Vlong (Int64.repr (limb64 (acc_val carry6) 0)))
     with (uint64_to_val (acc_lo carry6)).
 

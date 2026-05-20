@@ -29,6 +29,7 @@ Proof.
   apply derives_refl'.
   unfold acc_to_val.
   simpl.
+  fold_limb.
   do 3 f_equal.
   + apply Int64.eqm_samerepr.
     apply sumadd_limb0; rep_lia.
@@ -38,8 +39,8 @@ Proof.
     apply sumadd_limb1; rep_lia.
   + (* limb 2: acc + a < 2^128 so both sides are 0 *)
     f_equal. apply Int64.eqm_samerepr.
-    unfold limb64. simpl Z.of_nat. replace (64 * 2) with 128 by lia.
-    unfold Int64.eqm. change Int64.modulus with (2^64).
+    unfold limb. change ((2^64)^Z.of_nat 2) with (2^128).
+    unfold Int64.eqm.
     rewrite !Z.div_small by rep_lia.
     apply Zbits.eqmod_refl.
 Qed.

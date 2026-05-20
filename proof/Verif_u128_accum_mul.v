@@ -48,6 +48,7 @@ Proof.
   apply derives_refl'.
   unfold uint128_to_val.
   rewrite Hr'.
+  fold_limb.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.

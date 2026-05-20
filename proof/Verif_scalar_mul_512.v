@@ -328,29 +328,14 @@ Proof.
 
   (* Strip Vlong/Int64.repr wrappers *)
   unfold uint512_to_val, uint64_to_val.
-  change (map (fun z => Vlong (Int64.repr z))
-    [u64_val (acc_lo acc0); u64_val (acc_lo acc1);
-     u64_val (acc_lo acc2); u64_val (acc_lo acc3);
-     u64_val (acc_lo acc4); u64_val (acc_lo acc5);
-     u64_val (acc_lo acc6); u64_val (acc_lo carry6)] =
-   map (fun z => Vlong (Int64.repr z))
-    [limb64 (u512_val (mul_256 a b)) 0; limb64 (u512_val (mul_256 a b)) 1;
-     limb64 (u512_val (mul_256 a b)) 2; limb64 (u512_val (mul_256 a b)) 3;
-     limb64 (u512_val (mul_256 a b)) 4; limb64 (u512_val (mul_256 a b)) 5;
-     limb64 (u512_val (mul_256 a b)) 6; limb64 (u512_val (mul_256 a b)) 7]).
-  f_equal.
-
-  (* Unfold record wrappers to pure Z mod/div *)
+  refold_div.
+  simpl u128_val.
   unfold acc_lo.
   simpl u64_val.
-  unfold limb64.
-  simpl Z.of_nat.
-  rewrite !Z.mul_0_r, !Z.pow_0_r, !Z.div_1_r.
+  change (Z.pow_pos 2 64) with (2^64).
+  set (B := 2^64) in *.
 
   (* ===== Postcondition: prove mul_256 correctness via schoolbook lemma ===== *)
-
-  (* Apply the general schoolbook multiplication lemma *)
-  set (B := 2^64).
   pose proof (schoolbook_mul_4x4 B ltac:(unfold B; lia)
     (u64_val a0) (u64_val a1) (u64_val a2) (u64_val a3)
     (u64_val b0) (u64_val b1) (u64_val b2) (u64_val b3)

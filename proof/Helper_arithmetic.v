@@ -45,14 +45,18 @@ Definition limb (B : Z) (x : Z) (i : nat) : Z :=
 (** ** Tactics *)
 (* ================================================================= *)
 
-(** Expand [B^k] to left-associated products [B * B * ... * B]. *)
-Ltac expand_pow B :=
-  try replace (B ^ 7) with (B * B * B * B * B * B * B) by ring;
-  try replace (B ^ 6) with (B * B * B * B * B * B) by ring;
-  try replace (B ^ 5) with (B * B * B * B * B) by ring;
-  try replace (B ^ 4) with (B * B * B * B) by ring;
-  try replace (B ^ 3) with (B * B * B) by ring;
-  try replace (B ^ 2) with (B * B) by ring.
+(** Expand [B^k] to left-associated products [B * B * ... * B].
+    Stated as lemmas + a [expand_pow] Hint Rewrite database so callers
+    use [autorewrite with expand_pow] instead of a custom Ltac. *)
+Lemma pow_2_expand : forall B, B^2 = B * B. Proof. intros. ring. Qed.
+Lemma pow_3_expand : forall B, B^3 = B * B * B. Proof. intros. ring. Qed.
+Lemma pow_4_expand : forall B, B^4 = B * B * B * B. Proof. intros. ring. Qed.
+Lemma pow_5_expand : forall B, B^5 = B * B * B * B * B. Proof. intros. ring. Qed.
+Lemma pow_6_expand : forall B, B^6 = B * B * B * B * B * B. Proof. intros. ring. Qed.
+Lemma pow_7_expand : forall B, B^7 = B * B * B * B * B * B * B. Proof. intros. ring. Qed.
+
+#[export] Hint Rewrite pow_2_expand pow_3_expand pow_4_expand
+  pow_5_expand pow_6_expand pow_7_expand : expand_pow.
 
 (* ================================================================= *)
 (** ** Reconstruction lemmas *)
@@ -72,7 +76,7 @@ Proof.
   simpl (Z.of_nat _).
   rewrite Z.pow_0_r, Z.pow_1_r, Z.div_1_r.
 
-  expand_pow B.
+  autorewrite with expand_pow.
 
   (* Name successive quotients q_k = q_{k-1} / B *)
   set (q0 := x / B).
@@ -170,7 +174,7 @@ Proof.
   simpl (Z.of_nat _).
   rewrite Z.pow_0_r, Z.pow_1_r, Z.div_1_r.
 
-  expand_pow B.
+  autorewrite with expand_pow.
 
   (* Name successive quotients q_k = q_{k-1} / B *)
   set (q0 := x / B).

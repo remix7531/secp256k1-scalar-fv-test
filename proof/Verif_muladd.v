@@ -52,6 +52,7 @@ Proof.
   unfold acc_to_val, acc_muladd, u128_lo, u128_hi, mul_64.
   apply derives_refl'.
   simpl.
+  fold_limb.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.

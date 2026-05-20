@@ -76,10 +76,10 @@ Proof.
   rename H into Hov_range.       (* 0 <= overflow <= 2 *)
 
   (* --- Setup: name the four 64-bit limbs of r --- *)
-  set (d0 := limb64 (u256_val r) 0).
-  set (d1 := limb64 (u256_val r) 1).
-  set (d2 := limb64 (u256_val r) 2).
-  set (d3 := limb64 (u256_val r) 3).
+  set (d0 := limb (2^64) (u256_val r) 0).
+  set (d1 := limb (2^64) (u256_val r) 1).
+  set (d2 := limb (2^64) (u256_val r) 2).
+  set (d3 := limb (2^64) (u256_val r) 3).
   assert (Hd0 : 0 <= d0 < 2^64) by (subst d0; apply Z.mod_pos_bound; lia).
   assert (Hd1 : 0 <= d1 < 2^64) by (subst d1; apply Z.mod_pos_bound; lia).
   assert (Hd2 : 0 <= d2 < 2^64) by (subst d2; apply Z.mod_pos_bound; lia).
@@ -96,6 +96,9 @@ Proof.
 
   (* secp256k1_u128_from_u64(&t, r->d[0]) *)
   forward_call_u128_from_u64 v_t (mkUInt64 d0 Hd0) Tsh t_init Ht_init.
+  { entailer!. subst d0. unfold Znth. simpl.
+
+    rewrite limb_fold0. reflexivity. }
 
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * N_C_0) *)
   forward_call_u128_accum_u64 v_t t_init (mkUInt64 (overflow * N_C_0) Hov0) Tsh acc0 Hacc0_raw.
@@ -226,7 +229,7 @@ Proof.
     simpl u256_val.
     reflexivity. }
 
-  (* Unfold both sides to [Vlong (Int64.repr (limb64 ...))] form *)
+  (* Unfold both sides to [Vlong (Int64.repr (limb (2^64) ...))] form *)
   unfold uint256_to_val, uint64_to_val, u128_lo.
   simpl u64_val.
   simpl u256_val.
@@ -239,18 +242,18 @@ Proof.
   set (t2 := t1 / 2^64 + d2 + overflow * N_C_2).
   set (t3 := t2 / 2^64 + d3).
 
-  (* Simplify [limb64 x 0 = x mod 2^64] on LHS *)
-  unfold limb64 at 1 2 3 4.
-  simpl Z.of_nat.
-  simpl Z.mul.
-  rewrite !Z.pow_0_r, !Z.div_1_r.
-
+  (* Normalize [Z.pow_pos 2 64] notation to [2^64] *)
+  change (Z.pow_pos 2 64) with (2^64).
   (* Reduce to 4 pure Z equalities *)
-  cut (t0 mod 2^64 = limb64 result_val 0 /\
-       t1 mod 2^64 = limb64 result_val 1 /\
-       t2 mod 2^64 = limb64 result_val 2 /\
-       t3 mod 2^64 = limb64 result_val 3).
+  cut (t0 mod 2^64 = limb (2^64) result_val 0 /\
+       t1 mod 2^64 = limb (2^64) result_val 1 /\
+       t2 mod 2^64 = limb (2^64) result_val 2 /\
+       t3 mod 2^64 = limb (2^64) result_val 3).
   { intros [-> [-> [-> ->]]].
+    unfold limb. simpl Z.of_nat.
+    rewrite Z.pow_0_r, Z.div_1_r, Z.pow_1_r.
+    change ((2^64)^2) with (2^128).
+    change ((2^64)^3) with (2^192).
     reflexivity. }
 
   assert (Hchain_bound :
@@ -261,9 +264,8 @@ Proof.
           d0 d1 d2 d3 Hd0 Hd1 Hd2 Hd3
           t0 t1 t2 t3 result_val Hresult_range'.
 
-  (* Bridge limb64 <-> limb: (x / 2^(64*i)) mod 2^64 = (x / (2^64)^i) mod 2^64 *)
-  unfold limb64.
-  rewrite !Z.pow_mul_r by lia.
+  (* Unfold [limb (2^64) result_val i] to [(result_val / (2^64)^i) mod 2^64] *)
+  unfold limb.
   simpl (Z.of_nat _).
 
   (* ---- Pure Z ---- *)
@@ -274,6 +276,7 @@ Proof.
     pose proof (u256_as_eval4 r) as Heval.
     unfold eval4, u256_limb in Heval.
     simpl u64_val in Heval.
+    change (Z.pow_pos 2 64) with (2^64) in Heval.
     change ((2^64)^2) with (2^128) in Heval.
     change ((2^64)^3) with (2^192) in Heval.
     lia. }

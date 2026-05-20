@@ -7,6 +7,7 @@
 
 Require Import scalar_4x64.Verif_imports.
 Require Import scalar_4x64.Spec_scalar_4x64.
+Require Import scalar_4x64.Helper_arithmetic.
 
 (* ================================================================= *)
 (** ** Types *)
@@ -44,10 +45,6 @@ Record UInt512 := mkUInt512 {
 (* ================================================================= *)
 (** ** Operations *)
 
-(** The [i]-th 64-bit limb of [x]: [(x / 2^(64*i)) mod 2^64]. *)
-Definition limb64 (x : Z) (i : nat) : Z :=
-  (x / 2^(64 * Z.of_nat i)) mod 2^64.
-
 (** 64 x 64 -> 128-bit multiplication. *)
 Program Definition mul_64 (a b : UInt64) : UInt128 :=
   mkUInt128 (u64_val a * u64_val b) _.
@@ -74,12 +71,12 @@ Qed.
 
 (** Low 64 bits of a [UInt128]. *)
 Program Definition u128_lo (x : UInt128) : UInt64 :=
-  mkUInt64 (limb64 (u128_val x) 0) _.
+  mkUInt64 (u128_val x mod 2^64) _.
 Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (** High 64 bits of a [UInt128]. *)
 Program Definition u128_hi (x : UInt128) : UInt64 :=
-  mkUInt64 (limb64 (u128_val x) 1) _.
+  mkUInt64 ((u128_val x / 2^64) mod 2^64) _.
 Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (** Add a*b to the accumulator: acc' = acc + a*b. *)
@@ -95,7 +92,7 @@ Qed.
 
 (** Low 64 bits of an [Acc] (extracted limb). *)
 Program Definition acc_lo (acc : Acc) : UInt64 :=
-  mkUInt64 (limb64 (acc_val acc) 0) _.
+  mkUInt64 (acc_val acc mod 2^64) _.
 Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (** Right-shift the accumulator by 64 bits. *)
@@ -111,7 +108,7 @@ Qed.
 
 (** Extract the [i]-th 64-bit limb of a [UInt256] as a [UInt64]. *)
 Program Definition u256_limb (x : UInt256) (i : nat) : UInt64 :=
-  mkUInt64 (limb64 (u256_val x) i) _.
+  mkUInt64 (limb (2^64) (u256_val x) i) _.
 Next Obligation. apply Z.mod_pos_bound. lia. Qed.
 
 (* ================================================================= *)
@@ -124,22 +121,23 @@ Definition uint64_to_val (x : UInt64) : val :=
 (** Represent a [UInt128] as a C struct (lo, hi). *)
 Definition uint128_to_val (x : UInt128) : reptype t_secp256k1_uint128 :=
   let v := u128_val x in
-  (Vlong (Int64.repr (limb64 v 0)), Vlong (Int64.repr (limb64 v 1))).
+  (Vlong (Int64.repr (v mod 2^64)),
+   Vlong (Int64.repr ((v / 2^64) mod 2^64))).
 
 (** Represent an [Acc] as a C struct (c0, c1, c2). *)
 Definition acc_to_val (x : Acc) : reptype t_secp256k1_acc :=
   let v := acc_val x in
-  (Vlong (Int64.repr (limb64 v 0)),
-   (Vlong (Int64.repr (limb64 v 1)),
-    Vlong (Int64.repr (limb64 v 2)))).
+  (Vlong (Int64.repr (v mod 2^64)),
+   (Vlong (Int64.repr ((v / 2^64) mod 2^64)),
+    Vlong (Int64.repr ((v / 2^128) mod 2^64)))).
 
 (** Represent a [UInt256] as a 4-limb C scalar struct. *)
 Definition uint256_to_val (x : UInt256) : reptype t_secp256k1_uint256 :=
   let v := u256_val x in
-  [ Vlong (Int64.repr (limb64 v 0));
-    Vlong (Int64.repr (limb64 v 1));
-    Vlong (Int64.repr (limb64 v 2));
-    Vlong (Int64.repr (limb64 v 3)) ].
+  [ Vlong (Int64.repr (v mod 2^64));
+    Vlong (Int64.repr ((v / 2^64) mod 2^64));
+    Vlong (Int64.repr ((v / 2^128) mod 2^64));
+    Vlong (Int64.repr ((v / 2^192) mod 2^64)) ].
 
 (** Widen a [Scalar] (< N < 2^256) to a [UInt256]. *)
 Program Definition scalar_to_u256 (s : Scalar) : UInt256 :=
@@ -156,27 +154,19 @@ Qed.
 (** [scalar_to_val] and [uint256_to_val o scalar_to_u256] agree. *)
 Lemma scalar_to_val_eq (s : Scalar) :
   scalar_to_val s = uint256_to_val (scalar_to_u256 s).
-Proof.
-  destruct s as [v Hv].
-  unfold scalar_to_val, uint256_to_val, scalar_to_u256.
-  unfold limb64.
-  simpl (Z.of_nat _).
-  simpl (_ * _).
-  rewrite Z.div_1_r.
-  reflexivity.
-Qed.
+Proof. reflexivity. Qed.
 
 (** Represent a [UInt512] as an 8-limb C array. *)
 Definition uint512_to_val (x : UInt512) : list val :=
   let v := u512_val x in
-  [ Vlong (Int64.repr (limb64 v 0));
-    Vlong (Int64.repr (limb64 v 1));
-    Vlong (Int64.repr (limb64 v 2));
-    Vlong (Int64.repr (limb64 v 3));
-    Vlong (Int64.repr (limb64 v 4));
-    Vlong (Int64.repr (limb64 v 5));
-    Vlong (Int64.repr (limb64 v 6));
-    Vlong (Int64.repr (limb64 v 7)) ].
+  [ Vlong (Int64.repr (v mod 2^64));
+    Vlong (Int64.repr ((v / 2^64) mod 2^64));
+    Vlong (Int64.repr ((v / 2^128) mod 2^64));
+    Vlong (Int64.repr ((v / 2^192) mod 2^64));
+    Vlong (Int64.repr ((v / 2^256) mod 2^64));
+    Vlong (Int64.repr ((v / 2^320) mod 2^64));
+    Vlong (Int64.repr ((v / 2^384) mod 2^64));
+    Vlong (Int64.repr ((v / 2^448) mod 2^64)) ].
 
 (** Reconstruct a [UInt64] from a raw Z value. *)
 Program Definition val_to_uint64 (z : Z)
@@ -208,8 +198,9 @@ Proof.
   unfold uint256_to_val, uint64_to_val, u256_limb.
   simpl.
   assert (i = 0 \/ i = 1 \/ i = 2 \/ i = 3) by lia.
-  destruct H as [Hi0|[Hi1|[Hi2|Hi3]]].
-  all: subst i; reflexivity.
+  destruct H as [Hi0|[Hi1|[Hi2|Hi3]]];
+    subst i; simpl Znth; unfold limb; simpl Z.of_nat;
+    rewrite ?Z.mul_0_r, ?Z.pow_0_r, ?Z.div_1_r; reflexivity.
 Qed.
 
 (* ================================================================= *)

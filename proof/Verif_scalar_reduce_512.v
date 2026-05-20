@@ -13,11 +13,6 @@ Require Import scalar_4x64.Helper_forward_call.
 (* ----------------------------------------------------------------- *)
 (** *** Helper lemmas and tactics *)
 
-(** Normalize [limb64 x 0] to [x mod 2^64]. *)
-Ltac norm_limb64_0 :=
-  unfold limb64; simpl Z.of_nat; simpl Z.mul;
-  rewrite ?Z.pow_0_r, ?Z.div_1_r.
-
 Lemma round_identity : forall (acc : Acc) (lo : UInt64) (carry : Acc),
   lo = acc_lo acc ->
   acc_val carry = acc_val acc / 2^64 ->
@@ -27,7 +22,7 @@ Proof.
   rewrite H.
   unfold acc_lo.
   simpl u64_val.
-  norm_limb64_0.
+  rewrite ?limb_at_0.
   rewrite H0.
   pose proof (Z_div_mod_eq_full (acc_val acc) (2^64)).
   lia.
@@ -38,13 +33,12 @@ Lemma acc_init_eq : forall v (Hv : 0 <= v < 2^192),
   (Vlong (Int64.repr v), (Vlong (Int64.repr 0), Vlong (Int64.repr 0)))
   = acc_to_val (mkAcc v Hv).
 Proof.
-  intros.
+  intros v Hv Hv64.
   unfold acc_to_val.
   simpl acc_val.
-  norm_limb64_0.
-  rewrite Zmod_small by lia.
-  rewrite Z.div_small by lia.
-  replace (v / 2^128) with 0 by (symmetry; apply Z.div_small; lia).
+  rewrite (Z.mod_small v (2^64)) by lia.
+  rewrite (Z.div_small v (2^64)) by lia.
+  rewrite (Z.div_small v (2^128)) by lia.
   reflexivity.
 Qed.
 
@@ -54,7 +48,7 @@ Proof.
   intros.
   unfold u128_lo.
   simpl u64_val.
-  norm_limb64_0.
+  rewrite ?limb_at_0.
   reflexivity.
 Qed.
 
@@ -64,7 +58,7 @@ Proof.
   intros.
   unfold u128_hi.
   simpl u64_val.
-  unfold limb64.
+  unfold limb.
   simpl Z.of_nat.
   simpl Z.mul.
   change (64 * 1) with 64.
@@ -84,15 +78,6 @@ Proof.
   exists (- (x / 2^64) * 2^32).
   rewrite Zmod_eq by lia.
   lia.
-Qed.
-
-Lemma limb64_is_limb : forall x i, limb64 x i = limb (2^64) x i.
-Proof.
-  intros.
-  unfold limb64, limb.
-  do 2 f_equal.
-  rewrite <- Z.pow_mul_r by lia.
-  reflexivity.
 Qed.
 
 Lemma uint256_from_limbs :
@@ -116,10 +101,10 @@ Proof.
     ring. }
   pose proof (limbs_eval4 (2^64) (u64_val v0) (u64_val v1) (u64_val v2) (u64_val v3)
     ltac:(lia) Hv0 Hv1 Hv2 Hv3) as [Hl0 [Hl1 [Hl2 Hl3]]].
-  rewrite <- limb64_is_limb in Hl0, Hl1, Hl2, Hl3.
   rewrite <- Hr_eval in Hl0, Hl1, Hl2, Hl3.
   unfold uint256_to_val.
   simpl u256_val.
+  fold_limb.
   rewrite Hl0, Hl1, Hl2, Hl3.
   unfold uint64_to_val.
   reflexivity.
@@ -142,14 +127,14 @@ Proof.
     by entailer!.
 
   (* Name the 8 input limbs *)
-  set (l0 := limb64 (u512_val l) 0).
-  set (l1 := limb64 (u512_val l) 1).
-  set (l2 := limb64 (u512_val l) 2).
-  set (l3 := limb64 (u512_val l) 3).
-  set (n0 := limb64 (u512_val l) 4).
-  set (n1 := limb64 (u512_val l) 5).
-  set (n2 := limb64 (u512_val l) 6).
-  set (n3 := limb64 (u512_val l) 7).
+  set (l0 := limb (2^64) (u512_val l) 0).
+  set (l1 := limb (2^64) (u512_val l) 1).
+  set (l2 := limb (2^64) (u512_val l) 2).
+  set (l3 := limb (2^64) (u512_val l) 3).
+  set (n0 := limb (2^64) (u512_val l) 4).
+  set (n1 := limb (2^64) (u512_val l) 5).
+  set (n2 := limb (2^64) (u512_val l) 6).
+  set (n3 := limb (2^64) (u512_val l) 7).
 
   (* Range facts *)
   assert (Hl0 : 0 <= l0 < 2^64) by (subst l0; apply Z.mod_pos_bound; lia).
@@ -198,6 +183,7 @@ Proof.
       (Vlong (Int64.repr l0), (Vlong (Int64.repr 0), Vlong (Int64.repr 0))) v_acc
     = data_at Tsh t_secp256k1_acc (acc_to_val acc_s1_init) v_acc)
     by (f_equal; exact (acc_init_eq l0 Hacc_s1_init_range Hl0)).
+  unfold l0 in Hacc_eq; rewrite <- limb_fold0 in Hacc_eq.
   sep_apply (derives_refl' _ _ Hacc_eq).
   clear Hacc_eq.
 
@@ -394,7 +380,6 @@ Proof.
     (* 8-limb decomposition of u512_val l *)
     pose proof (eval8_limbs (2^64) (u512_val l) ltac:(lia)
       ltac:(change ((2^64)^8) with (2^512); exact (u512_range l))) as He8.
-    rewrite <- !limb64_is_limb in He8.
     fold l0 l1 l2 l3 n0 n1 n2 n3 in He8.
     unfold eval8 in He8.
     lia. 
@@ -502,10 +487,10 @@ Proof.
   forward_call_sumadd v_acc__1 carry_s2_1 m2_u64 acc_s2_2a Hacc_s2_2a.
 
   (* muladd(&acc__1, m6, N_C_0) -- m6 is uint32_t, widened to uint64 *)
-  set (m6_val := limb64 (acc_val carry_s1_5) 0).
+  set (m6_val := limb (2^64) (acc_val carry_s1_5) 0).
   assert (Hm6_range : 0 <= m6_val <= Int.max_unsigned).
   { unfold m6_val.
-    norm_limb64_0.
+    rewrite ?limb_at_0.
     rewrite Zmod_small by rep_lia.
     rep_lia. }
   assert (Hm6_u64_range : 0 <= m6_val < 2^64) by rep_lia.
@@ -517,10 +502,11 @@ Proof.
   { entailer!.
     simpl firstn.
     do 2 f_equal.
-    subst m6_val.
-    rewrite Int.unsigned_repr by lia.
-    subst m6_u64.
-    reflexivity. }
+    subst m6_u64; unfold uint64_to_val; simpl u64_val.
+    f_equal; f_equal.
+    rewrite Int64.Z_mod_modulus_eq.
+    rewrite Zmod_mod, limb_fold0.
+    apply Int.unsigned_repr; exact Hm6_range. }
 
   (* _t'15 = m5 *)
   forward.
@@ -563,9 +549,11 @@ Proof.
   { entailer!.
     simpl firstn.
     do 2 f_equal.
-    rewrite Int.unsigned_repr by lia.
-    subst m6_u64.
-    reflexivity. }
+    subst m6_u64; unfold uint64_to_val; simpl u64_val.
+    f_equal; f_equal.
+    rewrite Int64.Z_mod_modulus_eq.
+    rewrite Zmod_mod, limb_fold0.
+    apply Int.unsigned_repr; exact Hm6_range. }
 
   (* _t'12 = m5 *)
   forward.
@@ -582,7 +570,7 @@ Proof.
 
   assert (Hm6_le1 : m6_val <= 1).
   { unfold m6_val.
-    norm_limb64_0.
+    rewrite ?limb_at_0.
     rewrite Zmod_small by rep_lia.
     exact Hcarry_s1_5_ub. }
 
@@ -597,10 +585,10 @@ Proof.
   forward. (* p4 = (uint32_t)(_t'11 + _m6) *)
 
   (* Name p4 value and create UInt64 for it *)
-  set (p4_val := (limb64 (acc_val carry_s2_3) 0) + m6_val).
+  set (p4_val := (limb (2^64) (acc_val carry_s2_3) 0) + m6_val).
   assert (Hp4_range : 0 <= p4_val < 2^64).
   { unfold p4_val.
-    norm_limb64_0.
+    rewrite ?limb_at_0.
     rewrite Zmod_small by rep_lia.
     rep_lia. }
 
@@ -609,7 +597,7 @@ Proof.
   (* p4 fits in uint32 -- needed for the C cast (uint32_t)(acc.c0 + m6) *)
   assert (Hp4_u32 : p4_val <= Int.max_unsigned).
   { unfold p4_val.
-    norm_limb64_0.
+    rewrite ?limb_at_0.
     rewrite !Zmod_small by rep_lia.
     rep_lia. }
 
@@ -632,13 +620,13 @@ Proof.
     (* m6_val = acc_val carry_s1_5 *)
     assert (Hm6 : m6_val = acc_val carry_s1_5).
     { unfold m6_val.
-      norm_limb64_0.
+      rewrite ?limb_at_0.
       rewrite !Zmod_small by rep_lia. 
       reflexivity. }
 
-    (* limb64(carry_s2_3, 0) = acc_val carry_s2_3 (small enough) *)
-    assert (Hcarry_s2_3_lo : limb64 (acc_val carry_s2_3) 0 = acc_val carry_s2_3).
-    { norm_limb64_0.
+    (* limb (2^64) (carry_s2_3, 0) = acc_val carry_s2_3 (small enough) *)
+    assert (Hcarry_s2_3_lo : limb (2^64) (acc_val carry_s2_3) 0 = acc_val carry_s2_3).
+    { rewrite ?limb_at_0.
       rewrite Zmod_small by rep_lia.
       reflexivity. }
 
@@ -664,7 +652,7 @@ Proof.
   (* p4 bound needed by reduce_stage3_mod -- prove before clearing *)
   assert (Hp4_le3 : 0 <= p4_val <= 3).
   { unfold p4_val.
-    norm_limb64_0.
+    rewrite ?limb_at_0.
     rewrite !Zmod_small by rep_lia.
     rep_lia. }
 
@@ -696,14 +684,20 @@ Proof.
   forward_call_u128_accum_mul v_c128 c128_0
                 N_C_0_u64 p4_u64 Tsh c128_0a Hc128_0a.
   { entailer!.
-    unfold uint64_to_val, p4_u64, p4_val.
     simpl firstn.
-    do 5 f_equal.
+    do 4 f_equal.
     rewrite !Int64.Z_mod_modulus_eq.
-    rewrite !(Zmod_small m6_val) by rep_lia.
-    rewrite (Int.unsigned_repr m6_val) by rep_lia.
-    rewrite (Zmod_small (limb64 (acc_val carry_s2_3) 0 + m6_val)) by rep_lia.
-    rewrite Int.unsigned_repr by lia.
+    change Int64.modulus with (2^64).
+    change (Z.pow_pos 2 64) with (2^64).
+    rewrite ?(Zmod_mod (acc_val carry_s1_5) (2^64)).
+    rewrite ?(limb_fold0 (acc_val carry_s1_5)).
+    fold m6_val.
+    rewrite ?(Zmod_small m6_val) by rep_lia.
+    rewrite ?(Int.unsigned_repr m6_val) by rep_lia.
+    rewrite ?(limb_fold0 (acc_val carry_s2_3)).
+    fold p4_val.
+    rewrite ?(Zmod_small p4_val) by rep_lia.
+    rewrite ?Int.unsigned_repr by rep_lia.
     reflexivity. }
 
   (* r->d[0] = secp256k1_u128_to_u64(&c128) *)
@@ -731,14 +725,20 @@ Proof.
   forward_call_u128_accum_mul v_c128 c128_1a
                 N_C_1_u64 p4_u64 Tsh c128_1 Hc128_1.
   { entailer!.
-    unfold uint64_to_val, p4_u64.
     simpl firstn.
-    do 5 f_equal.
+    do 4 f_equal.
     rewrite !Int64.Z_mod_modulus_eq.
-    rewrite !(Zmod_small m6_val) by rep_lia.
-    rewrite (Int.unsigned_repr m6_val) by lia.
-    rewrite (Zmod_small (limb64 (acc_val carry_s2_3) 0 + m6_val)) by rep_lia.
-    rewrite Int.unsigned_repr by lia.
+    change Int64.modulus with (2^64).
+    change (Z.pow_pos 2 64) with (2^64).
+    rewrite ?(Zmod_mod (acc_val carry_s1_5) (2^64)).
+    rewrite ?(limb_fold0 (acc_val carry_s1_5)).
+    fold m6_val.
+    rewrite ?(Zmod_small m6_val) by rep_lia.
+    rewrite ?(Int.unsigned_repr m6_val) by rep_lia.
+    rewrite ?(limb_fold0 (acc_val carry_s2_3)).
+    fold p4_val.
+    rewrite ?(Zmod_small p4_val) by rep_lia.
+    rewrite ?Int.unsigned_repr by rep_lia.
     reflexivity. }
 
   (* r->d[1] = secp256k1_u128_to_u64(&c128) *)
@@ -764,14 +764,20 @@ Proof.
   (* secp256k1_u128_accum_u64(&c128, p4) -- N_C_2 = 1, so p4*N_C_2 = p4 *)
   forward_call_u128_accum_u64 v_c128 c128_2a p4_u64 Tsh c128_2 Hc128_2.
   { entailer!.
-    unfold uint64_to_val, p4_u64, p4_val.
     simpl firstn.
-    do 3 f_equal.
+    do 4 f_equal.
     rewrite !Int64.Z_mod_modulus_eq.
-    rewrite !(Zmod_small m6_val) by rep_lia.
-    rewrite (Int.unsigned_repr m6_val) by lia.
-    rewrite (Zmod_small (limb64 (acc_val carry_s2_3) 0 + m6_val)) by rep_lia.
-    rewrite Int.unsigned_repr by lia.
+    change Int64.modulus with (2^64).
+    change (Z.pow_pos 2 64) with (2^64).
+    rewrite ?(Zmod_mod (acc_val carry_s1_5) (2^64)).
+    rewrite ?(limb_fold0 (acc_val carry_s1_5)).
+    fold m6_val.
+    rewrite ?(Zmod_small m6_val) by rep_lia.
+    rewrite ?(Int.unsigned_repr m6_val) by rep_lia.
+    rewrite ?(limb_fold0 (acc_val carry_s2_3)).
+    fold p4_val.
+    rewrite ?(Zmod_small p4_val) by rep_lia.
+    rewrite ?Int.unsigned_repr by rep_lia.
     reflexivity. }
 
   (* r->d[2] = secp256k1_u128_to_u64(&c128) *)
@@ -993,14 +999,6 @@ Proof.
   simpl scalar_val.
   unfold uint256_to_val.
   simpl u256_val.
-  unfold limb64.
-  simpl (Z.of_nat _).
-  simpl (_ * 0).
-  simpl (_ * 1).
-  simpl (2 ^ 0).
-  rewrite Z.div_1_r.
-  change (64 * 2) with (128).
-  change (64 * 3) with (192).
   rewrite Hr_final.
   simpl u256_val.
   rewrite Hmod_eq.

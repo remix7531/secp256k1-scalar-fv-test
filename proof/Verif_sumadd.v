@@ -36,6 +36,7 @@ Proof.
   unfold acc_to_val.
   apply derives_refl'.
   simpl.
+  fold_limb.
   do 3 f_equal.
   + apply Int64.eqm_samerepr.
     apply sumadd_limb0; rep_lia.

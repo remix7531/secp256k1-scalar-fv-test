@@ -60,10 +60,10 @@ Proof.
   unfold Int64.cmpu.
 
   (* Name the four limbs and establish their ranges *)
-  set (d0 := limb64 (u256_val a) 0).
-  set (d1 := limb64 (u256_val a) 1).
-  set (d2 := limb64 (u256_val a) 2).
-  set (d3 := limb64 (u256_val a) 3).
+  set (d0 := limb (2^64) (u256_val a) 0).
+  set (d1 := limb (2^64) (u256_val a) 1).
+  set (d2 := limb (2^64) (u256_val a) 2).
+  set (d3 := limb (2^64) (u256_val a) 3).
   assert (Hd0 : 0 <= d0 < 2^64) by (subst d0; apply Z.mod_pos_bound; lia).
   assert (Hd1 : 0 <= d1 < 2^64) by (subst d1; apply Z.mod_pos_bound; lia).
   assert (Hd2 : 0 <= d2 < 2^64) by (subst d2; apply Z.mod_pos_bound; lia).
@@ -77,7 +77,8 @@ Proof.
     simpl u64_val in Heval.
     change ((2^64)^2) with (2^128) in Heval.
     change ((2^64)^3) with (2^192) in Heval.
-    lia. }
+    symmetry; exact Heval.
+  }
 
   (* Unfold Int64.ltu to zlt; replace limb unsigned_repr (in range)
      and evaluate the negative-constant unsigned values to N limbs *)
@@ -105,5 +106,17 @@ Proof.
   (* Remaining goals: False from a contradictory combination of limb
      comparisons and Z_lt_dec.  Unfold N constants and close with lia. *)
   all: exfalso.
-  all: rep_lia.
+  all: subst d0 d1 d2 d3;
+       rewrite ?limb_fold3, ?limb_fold2, ?limb_fold1, ?limb_fold0 in *;
+       pose proof (limb_u64_lt (u256_val a) 0);
+       pose proof (limb_u64_lt (u256_val a) 1);
+       pose proof (limb_u64_lt (u256_val a) 2);
+       pose proof (limb_u64_lt (u256_val a) 3);
+       rewrite ?(Int64.unsigned_repr (limb (2^64) (u256_val a) 0)),
+               ?(Int64.unsigned_repr (limb (2^64) (u256_val a) 1)),
+               ?(Int64.unsigned_repr (limb (2^64) (u256_val a) 2)),
+               ?(Int64.unsigned_repr (limb (2^64) (u256_val a) 3)) in *
+         by rep_lia;
+       unfold N_0, N_1, N_2, N_3, secp256k1_N in *;
+       lia.
 Qed.

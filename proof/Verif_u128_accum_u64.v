@@ -27,11 +27,12 @@ Proof.
   apply derives_refl'.
   unfold uint128_to_val.
   simpl u128_val.
+  fold_limb.
   do 3 f_equal.
   - (* lo limb *)
     apply Int64.eqm_samerepr.
-    apply Int64.eqm_trans with (y := limb64 (u128_val r) 0 + limb64 (u64_val a) 0).
-    + rewrite limb64_u64_val_0.
+    apply Int64.eqm_trans with (y := limb (2^64) (u128_val r) 0 + limb (2^64) (u64_val a) 0).
+    + rewrite limb_u64_val_0.
       apply Int64.eqm_refl.
     + apply eqm_of_mod_eq.
       apply limb_add_0; rep_lia.
@@ -39,13 +40,13 @@ Proof.
     apply Int64.eqm_samerepr.
     rewrite Int.signed_repr by (destruct (Int64.ltu _ _); simpl; rep_lia).
     rewrite ltu_carry_b2z
-      by (pose proof (limb64_u64_range (u128_val r) 0); rep_lia).
-    change Int64.modulus with (2^64).
+      by (pose proof (limb_u64_range (u128_val r) 0); rep_lia).
+
     apply Int64.eqm_trans with
-      (y := limb64 (u128_val r) 1 +
-            (limb64 (u64_val a) 1 +
-             (if limb64 (u128_val r) 0 + limb64 (u64_val a) 0 <? 2^64 then 0 else 1))).
-    + rewrite limb64_u64_val_0, limb64_u64_val_1.
+      (y := limb (2^64) (u128_val r) 1 +
+            (limb (2^64) (u64_val a) 1 +
+             (if limb (2^64) (u128_val r) 0 + limb (2^64) (u64_val a) 0 <? 2^64 then 0 else 1))).
+    + rewrite limb_u64_val_0, limb_u64_val_1.
       unfold Int64.eqm.
       apply Zbits.eqmod_refl.
     + apply eqm_of_mod_eq.

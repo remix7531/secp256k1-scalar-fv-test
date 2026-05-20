@@ -101,6 +101,26 @@ On a modern AMD laptop the proofs take a few minutes. VST's separation-logic
 tactics (`forward`, `entailer!`, `forward_call`) produce large proof terms,
 and `lia`/`nia` is called hundreds of times.
 
+## Proof automation
+
+A small automation layer lives in [`proof/Helper_verif.v`](proof/Helper_verif.v)
+and [`proof/Helper_forward_call.v`](proof/Helper_forward_call.v):
+
+- An overridden `rep_lia_setup2` auto-poses range facts for every
+  `u64_val/u128_val/acc_val/u256_val` in the goal, removing manual
+  `pose proof (u64_range x)` boilerplate.
+- `Hint Rewrite ... : rep_lia` registers constant unfoldings
+  (`N_C_*_eq`, `secp256k1_N_eq`, `limb_u64_val_*`) so `rep_lia` sees through them.
+- `forward_call_*` wrappers bundle `forward_call` with `Intros` / `rename` /
+  `deadvars!`, auto-discharging the parameter-matching obligation and
+  linear PROP side conditions in one step.
+- Bridge lemmas `uint128/acc/uint256/uint512_to_val_limb` (in
+  `Hint Rewrite ... : to_val_limb`) equate the inline-split form
+  `(v / 2^k) mod 2^64` to `limb (2^64) v i`, letting proofs flip
+  between the two representations.
+
+See [`STYLE.md`](STYLE.md) for usage conventions.
+
 ## Trust boundary
 
 A proof is only as good as its specification. The file

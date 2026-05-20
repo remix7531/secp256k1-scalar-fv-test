@@ -297,9 +297,9 @@ Proof.
       { apply eqmod_mod. rep_lia. }
     change Int64.modulus with (Int.modulus * Int.modulus).
     rewrite Hlo.
-    unfold limb64.
+    unfold limb.
     simpl Z.of_nat.
-    rewrite Z.mul_0_r, Z.div_1_r.
+    rewrite ?Z.pow_0_r, ?Z.div_1_r.
     change (2^64) with Int64.modulus.
     change (Int.modulus * Int.modulus) with Int64.modulus.
     apply Int64.eqm_refl.
@@ -308,9 +308,9 @@ Proof.
   + apply Int64.eqm_samerepr.
     rewrite Hhi.
     change (Int.modulus * Int.modulus) with Int64.modulus.
-    unfold limb64.
+    unfold limb.
     simpl Z.of_nat.
-    change (64 * 1)%Z with 64%Z.
+    rewrite ?Z.pow_1_r.
     change (2^64) with Int64.modulus.
     apply eqmod_mod.
     rep_lia.

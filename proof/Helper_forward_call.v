@@ -4,32 +4,55 @@
     bundle the [forward_call] with the boilerplate so that a
     single call replaces 3-6 lines.
 
-    When all PROP obligations are auto-solved, these Ltacs
-    complete in one step.  When obligations remain (overflow
-    bounds, frame, parameter matching), the caller solves them
-    with focused [{...}] blocks after the Ltac call. *)
+    Each wrapper has the shape
+    {[
+        Ltac forward_call_X args... :=
+          forward_call (...);
+          [ try solve_param_match; try (simpl; rep_lia) ..
+          | Intros ret; rename H into Hret; try deadvars! ].
+    ]}
+    The first column auto-discharges the parameter-matching
+    obligation via [solve_param_match] (which rewrites with the
+    [to_val_limb] Hint database) and any linear PROP via
+    [try (simpl; rep_lia)].  The trailing column introduces the
+    EX postcondition and gives it a stable hypothesis name.
+
+    When obligations remain (overflow bounds, frame), the caller
+    solves them with focused [{...}] blocks after the Ltac call. *)
 (** Copyright (C) 2026 remix7531
     SPDX-License-Identifier: GPL-3.0-or-later *)
 
 Require Export scalar_4x64.Helper_verif.
 
+(** Solve the parameter-matching [firstn ... = [...]] equation that
+    appears when the C-representation uses inline splits but the spec
+    arguments are [u256_limb x k] / [uint64_to_val _].  Rewrites with
+    the bridge lemmas [uint128/acc/uint256/uint512_to_val_limb] to
+    convert inline splits to [limb (2^64) v i] form. *)
+Ltac solve_param_match :=
+  entailer!;
+  autorewrite with to_val_limb;
+  unfold u256_limb, uint64_to_val;
+  simpl;
+  reflexivity.
+
 (** Accumulator helpers (muladd, muladd_fast, sumadd, sumadd_fast). *)
 
 Ltac forward_call_muladd acc_ptr acc a b acc' Hacc' :=
   forward_call (acc_ptr, acc, a, b, Tsh);
-  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try solve_param_match; try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_muladd_fast acc_ptr acc a b acc' Hacc' :=
   forward_call (acc_ptr, acc, a, b, Tsh);
-  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try solve_param_match; try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_sumadd acc_ptr acc a acc' Hacc' :=
   forward_call (acc_ptr, acc, a, Tsh);
-  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try solve_param_match; try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_sumadd_fast acc_ptr acc a acc' Hacc' :=
   forward_call (acc_ptr, acc, a, Tsh);
-  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try solve_param_match; try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 (** Extract helpers (extract, extract_fast).
     Returns a [(UInt64 * Acc)] pair that is destructured. *)

@@ -132,3 +132,38 @@ Three levels:
   Intros t_init.
   rename H into Ht_init.
   ```
+
+## Proof automation
+
+The project ships a small automation layer in `proof/Helper_verif.v` and
+`proof/Helper_forward_call.v`. Prefer it over hand-rolled patterns:
+
+- **`rep_lia` over `lia`** for goals involving `UInt64` / `UInt128` / `Acc`
+  values. The `rep_lia_setup2` hook in `Helper_verif.v` auto-poses the
+  carried range fact for every `u64_val ?x`, `u128_val ?x`, `acc_val ?x`,
+  `u256_val ?x` in the goal, eliminating manual
+  `pose proof (u64_range x)` calls.
+- **`forward_call_*` wrappers** in `Helper_forward_call.v` bundle each
+  `forward_call` with `Intros`, `rename H`, optional `destruct`, and
+  `deadvars!`. They auto-discharge the parameter-matching obligation via
+  `solve_param_match` (which rewrites with the `to_val_limb` Hint database)
+  and the linear PROP via `try (simpl; rep_lia)`. Use them in preference to
+  raw `forward_call (...) ; Intros ...`.
+- **Constants**: use `N_C_0_u64`, `N_C_1_u64`, `N_C_2_u64` (declared in
+  `Helper_verif.v`), not the verbose `mkUInt64 N_C_i N_C_i_range`. They
+  are registered with `Hint Rewrite` in the `rep_lia` database so
+  `u64_val N_C_i_u64` reduces automatically.
+- **Limbs**: use the generic `limb (2^64) v i` from `Helper_arithmetic.v`.
+  The C-representation
+  definitions (`uint128_to_val`, `acc_to_val`, `uint256_to_val`,
+  `uint512_to_val`) use **inline splits** `(v / 2^k) mod 2^64` in their
+  bodies, matching the spec style. Bridge lemmas
+  `uint128/acc/uint256/uint512_to_val_limb` (registered with
+  `Hint Rewrite … : to_val_limb`) equate the inline form to
+  `limb (2^64) v i`, so proofs can convert with `autorewrite with to_val_limb`.
+- **`limb_at_0` lemma**: rewrites `limb (2^64) v 0` back to `v mod 2^64`.
+  Replaces the older `norm_limb_0` Ltac. Use `rewrite ?limb_at_0` in
+  proofs that prefer the mod form.
+- **`Hint Rewrite ... : rep_lia`** is the registry for any lemma that
+  `rep_lia` should auto-apply (e.g. constant unfoldings, projector
+  reductions, limb-of-known-value identities).

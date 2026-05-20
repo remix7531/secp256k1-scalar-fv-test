@@ -33,10 +33,8 @@ Proof.
   apply derives_refl'.
   f_equal.
 
-  unfold uint128_to_val, limb64.
-  simpl Z.of_nat.
-  simpl Z.mul.
-  rewrite Z.div_1_r.
+  unfold uint128_to_val.
+  simpl u128_val.
 
   (* hi limb of (v/2^64) is 0 since v < 2^128 *)
   do 3 f_equal.

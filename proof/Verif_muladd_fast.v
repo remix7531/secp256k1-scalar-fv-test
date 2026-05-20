@@ -47,6 +47,7 @@ Proof.
   unfold acc_to_val, acc_muladd, u128_lo, u128_hi, mul_64.
   apply derives_refl'.
   simpl.
+  fold_limb.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
@@ -59,8 +60,8 @@ Proof.
   + (* limb 2: acc + a*b < 2^128 so limb 2 is 0 on both sides *)
     f_equal.
     apply Int64.eqm_samerepr.
-    unfold limb64.
-    simpl Z.of_nat.
+    unfold limb.
+    change ((2^64)^Z.of_nat 2) with (2^128).
     unfold Int64.eqm.
     replace Int64.modulus with (2^64) by reflexivity.
     rewrite !Z.div_small by rep_lia.

@@ -15,12 +15,8 @@ Lemma u64_uint128_repr (a : UInt64) :
   uint128_to_val (mkUInt128 (u64_val a) (u64_lt_u128 a)) =
   (uint64_to_val a, Vlong (Int64.repr 0)).
 Proof.
-  unfold uint128_to_val, uint64_to_val, limb64.
-  simpl Z.of_nat.
-  simpl Z.mul.
+  unfold uint128_to_val, uint64_to_val.
   simpl u128_val.
-  simpl Z.pow.
-  rewrite Z.div_1_r.
   do 4 f_equal.
   - apply Z.mod_small; rep_lia.
   - rewrite Z.div_small by rep_lia.

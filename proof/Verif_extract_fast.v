@@ -33,18 +33,13 @@ Proof.
   unfold acc_to_val.
   replace (acc_val (acc_shift acc)) with (acc_val acc / 2^64)
     by (unfold acc_shift; reflexivity).
-  simpl snd.
-  do 4 f_equal.
-
-  + (* limb 0 of shifted = limb 1 of original *)
-    symmetry. apply limb64_shift. rep_lia.
-  + (* limb 1 of shifted = 0 (since acc < 2^128, limb 2 = 0) *)
-    rewrite limb64_shift by rep_lia.
-    rewrite (limb64_high_zero (acc_val acc) 1) by rep_lia.
-    reflexivity.
-  + (* limb 2 of shifted = limb 2 of original (both 0) *)
-    rewrite limb64_shift by rep_lia.
-    rewrite (limb64_high_zero (acc_val acc) 1) by rep_lia.
-    rewrite (limb64_high_zero (acc_val acc) 2) by rep_lia.
-    reflexivity.
+  (* limb 1 of shifted = 0 (acc < 2^128) *)
+  rewrite (Zdiv.Zdiv_Zdiv (acc_val acc) (2^64) (2^64)) by lia.
+  change (2^64 * 2^64) with (2^128).
+  (* limb 2 of shifted = 0 (acc < 2^192) *)
+  rewrite (Zdiv.Zdiv_Zdiv (acc_val acc) (2^64) (2^128)) by lia.
+  change (2^64 * 2^128) with (2^192).
+  rewrite (Z.div_small (acc_val acc) (2^192)) by rep_lia.
+  rewrite (Z.div_small (acc_val acc) (2^128)) by rep_lia.
+  reflexivity.
 Qed.

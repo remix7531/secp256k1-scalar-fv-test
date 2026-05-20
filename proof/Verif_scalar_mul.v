@@ -30,17 +30,13 @@ Proof.
   (* Postcondition *)
   Exists r.
   entailer!.
-  - (* r = scalar_mul a b *)
-    destruct r as [rv Hr_range].
-    destruct a as [av Ha].
-    destruct b as [bv Hb].
-    unfold scalar_mul, scalar_to_u256, mul_256 in *.
-    simpl in *.
-    subst.
-    f_equal.
-    apply proof_irr.
-  - (* Rewrite uint256 back to scalar representation *)
-    rewrite <- !scalar_to_val_eq.
-    change t_secp256k1_uint256 with t_secp256k1_scalar.
-    cancel.
+  (* r = scalar_mul a b *)
+  destruct r as [rv Hr_range].
+  destruct a as [av Ha].
+  destruct b as [bv Hb].
+  unfold scalar_mul, scalar_to_u256, mul_256 in *.
+  simpl in *.
+  subst.
+  f_equal.
+  apply proof_irr.
 Qed.

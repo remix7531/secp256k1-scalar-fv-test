@@ -198,3 +198,33 @@ Proof.
     with (data_at_ sh tulong).
   cancel.
 Qed.
+
+(* ================================================================= *)
+(** ** Single-slot bridges: [tarray tulong N] slot <-> standalone [tulong]
+
+    When [forward] processes a store/load into a single slot of a
+    [tarray tulong N], it expects a [field_at sh (tarray tulong N) (SUB i) ...]
+    predicate.  But our pre-split state holds the slot as
+    [data_at sh tulong ... (field_address ...)] (via
+    [unfold_data_at__tulong_8]).
+
+    The conversion is just [field_at_data_at] specialized to [tarray tulong]:
+    [nested_field_type (tarray tulong N) (SUB i)] reduces to [tulong], so
+    these specialized statements avoid the need for a manual
+    [change tulong with (nested_field_type ...)] in client proofs.
+
+    Used in [Verif_scalar_mul_512.v] (slot 7 of the [l8] array). *)
+
+(** Bridge from [field_at_] (uninitialized slot) to slot-local [data_at_]. *)
+Lemma slot_field_at__eq_data_at_ :
+  forall (sh : share) (n i : Z) (p : val),
+  field_at_ sh (tarray tulong n) (SUB i) p =
+  data_at_ sh tulong (field_address (tarray tulong n) (SUB i) p).
+Proof. intros. rewrite field_at__data_at_. reflexivity. Qed.
+
+(** Bridge from [field_at] (initialized slot) to slot-local [data_at]. *)
+Lemma slot_field_at_eq_data_at :
+  forall (sh : share) (n i : Z) (v : val) (p : val),
+  field_at sh (tarray tulong n) (SUB i) v p =
+  data_at sh tulong v (field_address (tarray tulong n) (SUB i) p).
+Proof. intros. rewrite field_at_data_at. reflexivity. Qed.

@@ -309,9 +309,9 @@ Proof.
 
   (* l8[7] = acc.c0: first read acc.c0 into temp *)
   forward.
-  (* Now store to l8[7] *)
-  change tulong with (nested_field_type (tarray tulong 8) (SUB 7)).
-  rewrite <- field_at__data_at_.
+  (* Bridge the slot 7 data_at_ tulong back to field_at_ so [forward] can
+     find it; the equation is provided by [slot_field_at__eq_data_at_]. *)
+  rewrite <- slot_field_at__eq_data_at_.
   forward. (* l8[7] = acc.c0 *)
 
   (* ===== Cleanup: reassemble l8[0..7] array and strip VST machinery ===== *)
@@ -320,23 +320,9 @@ Proof.
   Exists (mul_256 a b).
   entailer!.
 
-  (* Convert field_at for l8[7] back into data_at, and normalize the value. *)
-  rewrite (field_at_data_at sh_l (tarray tulong 8) (SUB 7)) by reflexivity.
-  change (nested_field_type (tarray tulong 8) (SUB 7)) with tulong in *.
-  change (Vlong (Int64.repr (limb64 (acc_val carry6) 0)))
-    with (uint64_to_val (acc_lo carry6)).
-
-  (* Fold the 8 individual data_at into a single array data_at *)
-  sep_apply (fold_data_at_tulong_8 sh_l l8_ptr
-    (uint64_to_val (acc_lo acc0))
-    (uint64_to_val (acc_lo acc1))
-    (uint64_to_val (acc_lo acc2))
-    (uint64_to_val (acc_lo acc3))
-    (uint64_to_val (acc_lo acc4))
-    (uint64_to_val (acc_lo acc5))
-    (uint64_to_val (acc_lo acc6))
-    (uint64_to_val (acc_lo carry6))
-    Hfc).
+  (* Fold the 8 singleton data_ats into the array data_at. [sep_apply]
+     infers all args and bridges the slot-7 field_at/data_at coercion. *)
+  sep_apply fold_data_at_tulong_8.
 
   (* Reduce to list equality *)
   apply derives_refl'.

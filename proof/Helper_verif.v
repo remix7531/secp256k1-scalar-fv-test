@@ -18,7 +18,16 @@ Require Export scalar_4x64.Helper_arithmetic.
 Lemma N_C_0_eq : N_C_0 = 4624529908474429119. Proof. reflexivity. Qed.
 Lemma N_C_1_eq : N_C_1 = 4994812053365940164. Proof. reflexivity. Qed.
 Lemma N_C_2_eq : N_C_2 = 1. Proof. reflexivity. Qed.
-#[export] Hint Rewrite N_C_0_eq N_C_1_eq N_C_2_eq : rep_lia.
+Lemma N_0_eq : N_0 = 13822214165235122497. Proof. reflexivity. Qed.
+Lemma N_1_eq : N_1 = 13451932020343611451. Proof. reflexivity. Qed.
+Lemma N_2_eq : N_2 = 18446744073709551614. Proof. reflexivity. Qed.
+Lemma N_3_eq : N_3 = 18446744073709551615. Proof. reflexivity. Qed.
+Lemma secp256k1_N_eq :
+  secp256k1_N = 115792089237316195423570985008687907852837564279074904382605163141518161494337.
+Proof. reflexivity. Qed.
+#[export] Hint Rewrite N_C_0_eq N_C_1_eq N_C_2_eq
+                       N_0_eq N_1_eq N_2_eq N_3_eq
+                       secp256k1_N_eq : rep_lia.
 
 (** Reduction rules for record projections.
     These let [rep_lia] and VST's internal solvers see through
@@ -28,6 +37,84 @@ Proof. reflexivity. Qed.
 Lemma acc_val_mk : forall z H, acc_val (mkAcc z H) = z.
 Proof. reflexivity. Qed.
 #[export] Hint Rewrite u64_val_mk acc_val_mk : rep_lia.
+
+(** Extend VST's [rep_lia_setup2] hook so [rep_lia] auto-introduces
+    the carried range fact for every [u64_val ?x] / [u128_val ?x] /
+    [acc_val ?x] in the goal — same mechanism VST uses for
+    [Int.unsigned] / [Int64.signed].  This removes the need to
+    [pose proof (u64_range x)] manually before [rep_lia] calls. *)
+Lemma u128_val_hi_lt : forall x : UInt128, u128_val x / 2^64 < 2^64.
+Proof.
+  intros. apply Z.div_lt_upper_bound; [lia|].
+  pose proof (u128_range x). lia.
+Qed.
+
+(** UInt64 wrappers for the N_C limb constants, so call sites don't
+    keep rebuilding the same [mkUInt64 N_C_i N_C_i_range] term. *)
+Definition N_C_0_u64 : UInt64 := mkUInt64 N_C_0 N_C_0_range.
+Definition N_C_1_u64 : UInt64 := mkUInt64 N_C_1 N_C_1_range.
+Definition N_C_2_u64 : UInt64 := mkUInt64 N_C_2 N_C_2_range.
+
+Lemma u64_val_N_C_0_u64 : u64_val N_C_0_u64 = N_C_0. Proof. reflexivity. Qed.
+Lemma u64_val_N_C_1_u64 : u64_val N_C_1_u64 = N_C_1. Proof. reflexivity. Qed.
+Lemma u64_val_N_C_2_u64 : u64_val N_C_2_u64 = N_C_2. Proof. reflexivity. Qed.
+#[export] Hint Rewrite u64_val_N_C_0_u64 u64_val_N_C_1_u64 u64_val_N_C_2_u64 : rep_lia.
+
+Ltac rep_lia_setup2 ::=
+  pose_lemmas u64_val u64_range;
+  pose_lemmas u128_val u128_range;
+  pose_lemmas u128_val u128_val_hi_lt;
+  pose_lemmas acc_val acc_range;
+  pose_lemmas u256_val u256_range.
+
+(* ================================================================= *)
+(** ** Carry-bound lemmas
+
+    These lemmas replace the local [carry_bound] / [reduce_u128_bound]
+    Ltac tactics with declarative facts that callers can [apply] and
+    discharge side conditions with [rep_lia] or [lia]. *)
+
+(** Monotonicity of division by [2^64] over the integers, packaged for
+    direct use after rewriting an accumulator carry as [acc / 2^64].
+    Used to discharge [acc_val carry_k <= bound] goals in
+    [Verif_scalar_mul_512]. *)
+Lemma carry_div_ub : forall a b,
+  a <= b -> a / 2^64 <= b / 2^64.
+Proof.
+  intros. apply Z.div_le_mono; lia.
+Qed.
+
+(** Convenience form: [a / 2^64 <= c] from an intermediate numerator
+    bound [b] and a lia-friendly slack [b <= 2^64 * c + 2^64 - 1].
+    Both side conditions are closed by a single [lia]. *)
+Lemma carry_div_ub_eq : forall a b c,
+  a <= b -> b <= 2^64 * c + 2^64 - 1 -> a / 2^64 <= c.
+Proof.
+  intros a b c Hab Hslack.
+  enough (a / 2^64 < c + 1) by lia.
+  apply Z.div_lt_upper_bound; lia.
+Qed.
+
+(** [u128 = carry / 2^64 + lo] fits in [2^128]: after a carry-divide
+    step, [x / 2^64 < 2] when [x < 2 * 2^64].  Used to discharge the
+    [u128_val + u64_val < 2^128] precondition of
+    [secp256k1_u128_accum_u64] in [Verif_scalar_reduce]. *)
+Lemma reduce_u128_div_step : forall x y,
+  0 <= x -> x < 2 * 2^64 -> 0 <= y < 2^64 ->
+  x / 2^64 + y < 2^128.
+Proof.
+  intros.
+  assert (0 <= x / 2^64 < 2)
+    by (split; [apply Z.div_pos | apply Z.div_lt_upper_bound]; lia).
+  lia.
+Qed.
+
+(** Hint database [carry_bounds] collects the carry-bound lemmas.
+    Lemmas are typically applied explicitly at call sites for clarity,
+    but [eauto with carry_bounds] can dispatch the simpler shapes
+    automatically. *)
+#[export] Hint Resolve carry_div_ub carry_div_ub_eq
+  reduce_u128_div_step : carry_bounds.
 
 (* ================================================================= *)
 (** ** Inhabitant instances (needed by deadvars!) *)
@@ -60,9 +147,7 @@ Proof.
   unfold limb64.
   simpl Z.of_nat.
   rewrite Z.mul_0_r, Z.pow_0_r, Z.div_1_r.
-  apply Z.mod_small.
-  pose proof (u64_range a).
-  lia.
+  apply Z.mod_small. rep_lia.
 Qed.
 
 (** For a value in [0, 2^64), limb 1 is 0. *)
@@ -72,7 +157,7 @@ Proof.
   unfold limb64.
   simpl Z.of_nat.
   rewrite Z.mul_1_r.
-  rewrite Z.div_small by (pose proof (u64_range a); lia).
+  rewrite Z.div_small by rep_lia.
   reflexivity.
 Qed.
 
@@ -108,13 +193,7 @@ Qed.
 (** The product of two 64-bit unsigned integers is at most [(2^64-1)^2]. *)
 Lemma u64_mul_bound : forall (a b : UInt64),
   u64_val a * u64_val b <= (2^64 - 1) * (2^64 - 1).
-Proof.
-  intros.
-  apply Z.mul_le_mono_nonneg.
-  all: pose proof (u64_range a).
-  all: pose proof (u64_range b).
-  all: lia.
-Qed.
+Proof. intros. apply Z.mul_le_mono_nonneg; rep_lia. Qed.
 
 (** Product of two 32-bit values fits in 64 bits. *)
 Lemma mul_u32_range : forall a b,
@@ -180,7 +259,7 @@ Proof.
   change (limb64 (u256_val x) 1) with (limb (2^64) (u256_val x) 1).
   change (limb64 (u256_val x) 2) with (limb (2^64) (u256_val x) 2).
   change (limb64 (u256_val x) 3) with (limb (2^64) (u256_val x) 3).
-  apply eval4_limbs; [lia | pose proof (u256_range x); lia].
+  apply eval4_limbs; rep_lia.
 Qed.
 
 (* ----------------------------------------------------------------- *)

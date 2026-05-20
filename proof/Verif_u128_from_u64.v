@@ -9,11 +9,7 @@ Require Import scalar_4x64.Helper_verif.
 (** ** secp256k1_u128_from_u64 *)
 
 Lemma u64_lt_u128 (a : UInt64) : 0 <= u64_val a < 2^128.
-Proof.
-  destruct a.
-  simpl.
-  lia.
-Qed.
+Proof. rep_lia. Qed.
 
 Lemma u64_uint128_repr (a : UInt64) :
   uint128_to_val (mkUInt128 (u64_val a) (u64_lt_u128 a)) =
@@ -25,10 +21,9 @@ Proof.
   simpl u128_val.
   simpl Z.pow.
   rewrite Z.div_1_r.
-  pose proof (u64_range a) as Ha.
   do 4 f_equal.
-  - apply Z.mod_small; lia.
-  - rewrite Z.div_small by lia.
+  - apply Z.mod_small; rep_lia.
+  - rewrite Z.div_small by rep_lia.
     reflexivity.
 Qed.
 

@@ -9,13 +9,6 @@ Require Import scalar_4x64.Helper_forward_call.
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
 
-(* Carry bound tactic: given [carry = acc / 2^64] and [acc = expr],
-   prove [carry <= num_ub / 2^64] by bounding the numerator. *)
-Local Ltac carry_bound Hcarry Hacc num_ub :=
-  rewrite Hcarry, Hacc;
-  apply (Z.le_trans _ (num_ub / 2^64));
-  [ apply Z.div_le_mono; lia | reflexivity ].
-
 Lemma body_secp256k1_scalar_mul_512:
   semax_body Vprog Gprog f_secp256k1_scalar_mul_512 secp256k1_scalar_mul_512_spec.
 Proof.
@@ -58,38 +51,23 @@ Proof.
   set (b2 := u256_limb b 2).
   set (b3 := u256_limb b 3).
 
-  (* Range facts for all limbs -- used throughout the proof *)
-  pose proof (u64_range a0) as Ha0.
-  pose proof (u64_range a1) as Ha1.
-  pose proof (u64_range a2) as Ha2.
-  pose proof (u64_range a3) as Ha3.
-  pose proof (u64_range b0) as Hb0.
-  pose proof (u64_range b1) as Hb1.
-  pose proof (u64_range b2) as Hb2.
-  pose proof (u64_range b3) as Hb3.
-
   (* All 16 limb products are bounded by (2^64-1)^2 *)
-  assert (Hprod_bound : forall x y : UInt64,
-    u64_val x * u64_val y <= (2^64 - 1) * (2^64 - 1))
-    by (intros; apply Z.mul_le_mono_nonneg;
-        pose proof (u64_range x); pose proof (u64_range y); lia).
-  pose proof (Hprod_bound a0 b0) as Hab00.
-  pose proof (Hprod_bound a0 b1) as Hab01.
-  pose proof (Hprod_bound a0 b2) as Hab02.
-  pose proof (Hprod_bound a0 b3) as Hab03.
-  pose proof (Hprod_bound a1 b0) as Hab10.
-  pose proof (Hprod_bound a1 b1) as Hab11.
-  pose proof (Hprod_bound a1 b2) as Hab12.
-  pose proof (Hprod_bound a1 b3) as Hab13.
-  pose proof (Hprod_bound a2 b0) as Hab20.
-  pose proof (Hprod_bound a2 b1) as Hab21.
-  pose proof (Hprod_bound a2 b2) as Hab22.
-  pose proof (Hprod_bound a2 b3) as Hab23.
-  pose proof (Hprod_bound a3 b0) as Hab30.
-  pose proof (Hprod_bound a3 b1) as Hab31.
-  pose proof (Hprod_bound a3 b2) as Hab32.
-  pose proof (Hprod_bound a3 b3) as Hab33.
-  clear Hprod_bound.
+  pose proof (u64_mul_bound a0 b0) as Hab00.
+  pose proof (u64_mul_bound a0 b1) as Hab01.
+  pose proof (u64_mul_bound a0 b2) as Hab02.
+  pose proof (u64_mul_bound a0 b3) as Hab03.
+  pose proof (u64_mul_bound a1 b0) as Hab10.
+  pose proof (u64_mul_bound a1 b1) as Hab11.
+  pose proof (u64_mul_bound a1 b2) as Hab12.
+  pose proof (u64_mul_bound a1 b3) as Hab13.
+  pose proof (u64_mul_bound a2 b0) as Hab20.
+  pose proof (u64_mul_bound a2 b1) as Hab21.
+  pose proof (u64_mul_bound a2 b2) as Hab22.
+  pose proof (u64_mul_bound a2 b3) as Hab23.
+  pose proof (u64_mul_bound a3 b0) as Hab30.
+  pose proof (u64_mul_bound a3 b1) as Hab31.
+  pose proof (u64_mul_bound a3 b2) as Hab32.
+  pose proof (u64_mul_bound a3 b3) as Hab33.
 
   (* Pre-split the uninitialized l8 array into 8 individual slots.
      This lets each extract call find its target via cancel. *)
@@ -104,7 +82,7 @@ Proof.
   (* muladd_fast(&acc, a0, b0) *)
   forward_call_muladd_fast v_acc acc_init a0 b0 acc0 Hacc0_post.
   { (* overflow: 0 + a0*b0 < 2^128 *)
-    apply mul_u64_lt_u128; lia. }
+    apply mul_u64_lt_u128; rep_lia. }
 
   (* Track acc_val through round 0 *)
   assert (Hacc0 : acc_val acc0 = u64_val a0 * u64_val b0).
@@ -125,8 +103,9 @@ Proof.
     simpl nested_field_offset.
     rewrite isptr_offset_val_zero; auto. }
 
-  assert (Hcarry0_ub : acc_val carry0 <= 2^64 - 2)
-    by (carry_bound Hcarry0_eq Hacc0 ((2^64 - 1) * (2^64 - 1))).
+  assert (Hcarry0_ub : acc_val carry0 <= 2^64 - 2).
+  { rewrite Hcarry0_eq, Hacc0.
+    apply (carry_div_ub_eq _ ((2^64 - 1) * (2^64 - 1)) _); lia. }
 
   (* ===== Round 1: l8[1] = a0*b1 + a1*b0 (2 products, uses muladd + extract) ===== *)
 
@@ -143,16 +122,16 @@ Proof.
   (* Full chain for round 1 *)
   assert (Hacc1 : acc_val acc1 =
     acc_val carry0 + u64_val a0 * u64_val b1 + u64_val a1 * u64_val b0).
-  { rewrite Hacc1_eq, Hacc1a_eq.
-    reflexivity. }
+  { rewrite Hacc1_eq, Hacc1a_eq. lia. }
 
   (* extract(&acc, &l8[1]) *)
   forward_call_extract v_acc acc1
     (field_address (tarray tulong 8) [ArraySubsc 1] l8_ptr)
     Tsh sh_l r1 carry1 Hr1_eq Hcarry1_eq.
 
-  assert (Hcarry1_ub : acc_val carry1 <= 2 * 2^64 - 3)
-    by (carry_bound Hcarry1_eq Hacc1 ((2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1)))).
+  assert (Hcarry1_ub : acc_val carry1 <= 2 * 2^64 - 3).
+  { rewrite Hcarry1_eq, Hacc1.
+    apply (carry_div_ub_eq _ ((2^64 - 2) + 2 * ((2^64 - 1) * (2^64 - 1))) _); lia. }
 
   (* ===== Round 2: l8[2] = a0*b2 + a1*b1 + a2*b0 (3 products) ===== *)
 
@@ -177,16 +156,16 @@ Proof.
   (* Full chain for round 2 *)
   assert (Hacc2 : acc_val acc2 =
     acc_val carry1 + u64_val a0 * u64_val b2 + u64_val a1 * u64_val b1 + u64_val a2 * u64_val b0).
-  { rewrite Hacc2_eq, Hacc2b_eq, Hacc2a_eq.
-    lia. }
+  { rewrite Hacc2_eq, Hacc2b_eq, Hacc2a_eq. lia. }
 
   (* extract(&acc, &l8[2]) *)
   forward_call_extract v_acc acc2
     (field_address (tarray tulong 8) [ArraySubsc 2] l8_ptr)
     Tsh sh_l r2 carry2 Hr2_eq Hcarry2_eq.
 
-  assert (Hcarry2_ub : acc_val carry2 <= 3 * 2^64 - 4)
-    by (carry_bound Hcarry2_eq Hacc2 ((2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1)))).
+  assert (Hcarry2_ub : acc_val carry2 <= 3 * 2^64 - 4).
+  { rewrite Hcarry2_eq, Hacc2.
+    apply (carry_div_ub_eq _ ((2 * 2^64 - 3) + 3 * ((2^64 - 1) * (2^64 - 1))) _); lia. }
 
   (* ===== Round 3: l8[3] = a0*b3 + a1*b2 + a2*b1 + a3*b0 (4 products) ===== *)
 
@@ -218,16 +197,16 @@ Proof.
   assert (Hacc3 : acc_val acc3 =
     acc_val carry2 + u64_val a0 * u64_val b3 + u64_val a1 * u64_val b2
     + u64_val a2 * u64_val b1 + u64_val a3 * u64_val b0).
-  { rewrite Hacc3_eq, Hacc3c_eq, Hacc3b_eq, Hacc3a_eq.
-    lia. }
+  { rewrite Hacc3_eq, Hacc3c_eq, Hacc3b_eq, Hacc3a_eq. lia. }
 
   (* extract(&acc, &l8[3]) *)
   forward_call_extract v_acc acc3
     (field_address (tarray tulong 8) [ArraySubsc 3] l8_ptr)
     Tsh sh_l r3 carry3 Hr3_eq Hcarry3_eq.
 
-  assert (Hcarry3_ub : acc_val carry3 <= 4 * 2^64 - 5)
-    by (carry_bound Hcarry3_eq Hacc3 ((3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1)))).
+  assert (Hcarry3_ub : acc_val carry3 <= 4 * 2^64 - 5).
+  { rewrite Hcarry3_eq, Hacc3.
+    apply (carry_div_ub_eq _ ((3 * 2^64 - 4) + 4 * ((2^64 - 1) * (2^64 - 1))) _); lia. }
 
   (* ===== Round 4: l8[4] = a1*b3 + a2*b2 + a3*b1 (3 products) ===== *)
 
@@ -260,8 +239,9 @@ Proof.
     (field_address (tarray tulong 8) [ArraySubsc 4] l8_ptr)
     Tsh sh_l r4 carry4 Hr4_eq Hcarry4_eq.
 
-  assert (Hcarry4_ub : acc_val carry4 <= 3 * 2^64 - 3)
-    by (carry_bound Hcarry4_eq Hacc4 ((4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1)))).
+  assert (Hcarry4_ub : acc_val carry4 <= 3 * 2^64 - 3).
+  { rewrite Hcarry4_eq, Hacc4.
+    apply (carry_div_ub_eq _ ((4 * 2^64 - 5) + 3 * ((2^64 - 1) * (2^64 - 1))) _); lia. }
 
   (* ===== Round 5: l8[5] = a2*b3 + a3*b2 (2 products) ===== *)
 
@@ -287,8 +267,9 @@ Proof.
     (field_address (tarray tulong 8) [ArraySubsc 5] l8_ptr)
     Tsh sh_l r5 carry5 Hr5_eq Hcarry5_eq.
 
-  assert (Hcarry5_ub : acc_val carry5 <= 2 * 2^64 - 2)
-    by (carry_bound Hcarry5_eq Hacc5 ((3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1)))).
+  assert (Hcarry5_ub : acc_val carry5 <= 2 * 2^64 - 2).
+  { rewrite Hcarry5_eq, Hacc5.
+    apply (carry_div_ub_eq _ ((3 * 2^64 - 3) + 2 * ((2^64 - 1) * (2^64 - 1))) _); lia. }
 
   (* ===== Round 6: l8[6],l8[7] = a3*b3 (1 product, uses muladd_fast + extract_fast + store) ===== *)
 

@@ -30,8 +30,7 @@ Proof.
   forward. (* _t'2 = acc->c1 *)
   forward. (* acc->c2 = _t'1 + (_t'2 < over) *)
 
-  Exists (mkAcc (acc_val acc + u64_val a)
-    ltac:(pose proof (acc_range acc); pose proof (u64_range a); lia)).
+  Exists (mkAcc (acc_val acc + u64_val a) ltac:(rep_lia)).
   entailer!.
 
   unfold acc_to_val.
@@ -39,11 +38,11 @@ Proof.
   simpl.
   do 3 f_equal.
   + apply Int64.eqm_samerepr.
-    apply sumadd_limb0; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+    apply sumadd_limb0; rep_lia.
   + f_equal. apply Int64.eqm_samerepr.
     rewrite Int.unsigned_repr
       by (unfold Z.b2z; destruct (Int64.ltu _ _); rep_lia).
-    apply sumadd_limb1; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+    apply sumadd_limb1; rep_lia.
   + f_equal. apply Int64.eqm_samerepr.
-    apply sumadd_limb2; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+    apply sumadd_limb2; rep_lia.
 Qed.

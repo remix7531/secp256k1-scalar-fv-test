@@ -46,12 +46,6 @@ Proof.
   lia.
 Qed.
 
-(** Accumulator-fits-in-u128: carry (< 2*2^64) plus a 64-bit value. *)
-Lemma reduce_accum_bound : forall x y,
-  0 <= x -> x < 2 * 2^64 -> 0 <= y < 2^64 ->
-  x + y < 2^128.
-Proof. lia. Qed.
-
 (** Each carry is [< 2] because the intermediate sum is [< 2*2^64]. *)
 Lemma reduce_carry_lt_2 : forall a,
   0 <= a -> a < 2 * 2^64 ->
@@ -68,21 +62,9 @@ Ltac solve_reduce_expr_match :=
   entailer!; simpl; unfold uint64_to_val; simpl u64_val;
   f_equal; f_equal; f_equal; simpl;
   first
-    [ rewrite N_C_0_expr; apply Int64_mul_repr; unfold N_C_0; rep_lia
-    | rewrite N_C_1_expr; apply Int64_mul_repr; unfold N_C_1; rep_lia
+    [ rewrite N_C_0_expr; apply Int64_mul_repr; rep_lia
+    | rewrite N_C_1_expr; apply Int64_mul_repr; rep_lia
     | unfold N_C_2; rewrite Z.mul_1_r; reflexivity ].
-
-(** Prove accumulator-fits-in-u128 by chaining carry bounds. *)
-Ltac reduce_u128_bound :=
-  simpl u64_val;
-  unfold N_C_0, N_C_1, N_C_2 in *;
-  repeat match goal with
-  | |- context [?x / 2^64] =>
-    let c := fresh "c" in
-    set (c := x / 2^64) in *;
-    pose proof (reduce_carry_lt_2 x ltac:(lia) ltac:(lia))
-  end;
-  apply reduce_accum_bound; lia.
 
 Lemma body_secp256k1_scalar_reduce:
   semax_body Vprog Gprog
@@ -142,7 +124,8 @@ Proof.
   (* secp256k1_u128_accum_u64(&t, r->d[1]) *)
   forward_call_u128_accum_u64 v_t carry0 (mkUInt64 d1 Hd1) Tsh t1a Ht1a.
   { rewrite Hcarry0_val.
-    reduce_u128_bound. }
+    simpl u64_val.
+    apply reduce_u128_div_step; rep_lia. }
 
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * ~N_1) *)
   forward_call_u128_accum_u64 v_t t1a (mkUInt64 (overflow * N_C_1) Hov1) Tsh acc1 Hacc1_raw.
@@ -150,7 +133,8 @@ Proof.
   { rewrite Ht1a.
     simpl u64_val.
     rewrite Hcarry0_val.
-    reduce_u128_bound. }
+    pose proof (reduce_carry_lt_2 (d0 + overflow * N_C_0) ltac:(rep_lia) ltac:(rep_lia)).
+    rep_lia. }
   assert (Hacc1 : u128_val acc1 =
     (d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1)
     by (rewrite Hacc1_raw, Ht1a; simpl u64_val; rewrite Hcarry0_val; lia).
@@ -174,16 +158,10 @@ Proof.
 
   (* secp256k1_u128_accum_u64(&t, r->d[2]) *)
   forward_call_u128_accum_u64 v_t carry1 (mkUInt64 d2 Hd2) Tsh t2a Ht2a.
-  { rewrite Hcarry1_val, Hacc1.
-    reduce_u128_bound. }
 
   (* secp256k1_u128_accum_u64(&t, (uint64_t)overflow * N_C_2) *)
   forward_call_u128_accum_u64 v_t t2a (mkUInt64 (overflow * N_C_2) Hov2) Tsh acc2 Hacc2_raw.
   { solve_reduce_expr_match. }
-  { rewrite Ht2a.
-    simpl u64_val.
-    rewrite Hcarry1_val, Hacc1.
-    reduce_u128_bound. }
   assert (Hacc2 : u128_val acc2 =
     ((d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1) / 2^64
     + d2 + overflow * N_C_2)
@@ -208,8 +186,6 @@ Proof.
 
   (* secp256k1_u128_accum_u64(&t, r->d[3]) *)
   forward_call_u128_accum_u64 v_t carry2 (mkUInt64 d3 Hd3) Tsh acc3 Hacc3_raw.
-  { rewrite Hcarry2_val, Hacc2.
-    reduce_u128_bound. }
   assert (Hacc3 : u128_val acc3 =
     (((d0 + overflow * N_C_0) / 2^64 + d1 + overflow * N_C_1) / 2^64
      + d2 + overflow * N_C_2) / 2^64 + d3)

@@ -22,8 +22,7 @@ Proof.
   forward. (* _t'2 = acc->c0 *)
   forward. (* acc->c1 = _t'1 + (_t'2 < a) *)
 
-  Exists (mkAcc (acc_val acc + u64_val a)
-    ltac:(pose proof (acc_range acc); pose proof (u64_range a); lia)).
+  Exists (mkAcc (acc_val acc + u64_val a) ltac:(rep_lia)).
 
   entailer!.
 
@@ -32,16 +31,15 @@ Proof.
   simpl.
   do 3 f_equal.
   + apply Int64.eqm_samerepr.
-    apply sumadd_limb0; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+    apply sumadd_limb0; rep_lia.
   + f_equal. apply Int64.eqm_samerepr.
     rewrite Int.signed_repr
       by (unfold Z.b2z; destruct (Int64.ltu _ _); rep_lia).
-    apply sumadd_limb1; [pose proof (acc_range acc) | pose proof (u64_range a)]; lia.
+    apply sumadd_limb1; rep_lia.
   + (* limb 2: acc + a < 2^128 so both sides are 0 *)
     f_equal. apply Int64.eqm_samerepr.
     unfold limb64. simpl Z.of_nat. replace (64 * 2) with 128 by lia.
     unfold Int64.eqm. change Int64.modulus with (2^64).
-    rewrite !Z.div_small
-      by (pose proof (acc_range acc); pose proof (u64_range a); lia).
+    rewrite !Z.div_small by rep_lia.
     apply Zbits.eqmod_refl.
 Qed.

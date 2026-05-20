@@ -33,7 +33,6 @@ Proof.
   entailer!.
 
   (* --- Postcondition: C struct = acc_to_val (acc_shift acc) --- *)
-  pose proof (acc_range acc) as Hacc.
   apply derives_refl'.
   unfold acc_to_val.
   replace (acc_val (acc_shift acc)) with (acc_val acc / 2^64)
@@ -41,16 +40,11 @@ Proof.
   do 4 f_equal.
 
   + (* limb 0 of shifted = limb 1 of original *)
-    symmetry.
-    apply limb64_shift.
-    lia.
+    symmetry. apply limb64_shift. rep_lia.
   + (* limb 1 of shifted = limb 2 of original *)
-    f_equal.
-    symmetry.
-    apply limb64_shift.
-    lia.
+    f_equal. symmetry. apply limb64_shift. rep_lia.
   + (* limb 2 of shifted = 0 *)
-    rewrite limb64_shift by lia.
-    rewrite (limb64_high_zero (acc_val acc) 2) by lia.
+    rewrite limb64_shift by rep_lia.
+    rewrite (limb64_high_zero (acc_val acc) 2) by rep_lia.
     reflexivity.
 Qed.

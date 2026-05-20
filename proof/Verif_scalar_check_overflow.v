@@ -105,6 +105,5 @@ Proof.
   (* Remaining goals: False from a contradictory combination of limb
      comparisons and Z_lt_dec.  Unfold N constants and close with lia. *)
   all: exfalso.
-  all: unfold secp256k1_N, N_0, N_1, N_2, N_3 in *.
-  all: lia.
+  all: rep_lia.
 Qed.

@@ -13,10 +13,7 @@ Lemma mk_u128_sum (r : UInt128) (a b : UInt64)
   { r' : UInt128 | u128_val r' = u128_val r + u64_val a * u64_val b }.
 Proof.
   refine (exist _ (mkUInt128 (u128_val r + u64_val a * u64_val b) _) eq_refl).
-  pose proof (u128_range r).
-  pose proof (u64_range a).
-  pose proof (u64_range b).
-  lia.
+  rep_lia.
 Defined.
 
 Lemma body_secp256k1_u128_accum_mul:
@@ -43,8 +40,6 @@ Proof.
   forward. (* r->hi = _t'1 + _t'2 + (_t'3 < _t'4) *)
 
   (* Provide witness *)
-  set (prod := u64_val a * u64_val b).
-  set (rv := u128_val r).
   destruct (mk_u128_sum r a b H) as [r' Hr'].
   Exists r'.
   entailer!.
@@ -56,13 +51,9 @@ Proof.
   do 3 f_equal.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
-    apply eqm_of_mod_eq. 
-    apply limb_add_0.
-    - destruct r; simpl; lia.
-    - apply Z.mul_nonneg_nonneg; destruct a, b; simpl; lia.
+    apply eqm_of_mod_eq.
+    apply limb_add_0; [rep_lia | apply Z.mul_nonneg_nonneg; rep_lia].
   + (* limb 1 *)
     apply Int64.eqm_samerepr.
-    apply muladd_limb1.
-    - destruct r; simpl; lia.
-    - apply Z.mul_nonneg_nonneg; destruct a, b; simpl; lia.
+    apply muladd_limb1; [rep_lia | apply Z.mul_nonneg_nonneg; rep_lia].
 Qed.

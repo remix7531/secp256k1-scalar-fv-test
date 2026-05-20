@@ -24,13 +24,8 @@ Proof.
   rewrite Int.signed_repr by rep_lia.
 
   (* Witness: r' = r / 2^64 *)
-  pose proof (u128_range r) as Hr.
   assert (Hshift : 0 <= u128_val r / 2^64 < 2^128).
-  { split.
-    - apply Z.div_pos; lia.
-    - apply Z.lt_trans with (2^64).
-      + apply Z.div_lt_upper_bound; lia.
-      + lia. }
+  { split; [apply Z.div_pos; rep_lia | apply Z.div_lt_upper_bound; rep_lia]. }
   Exists (mkUInt128 (u128_val r / 2^64) Hshift).
   entailer!.
 
@@ -38,19 +33,13 @@ Proof.
   apply derives_refl'.
   f_equal.
 
-  destruct r as [v [Hv0 Hv1]].
-  unfold uint128_to_val, limb64, u128_val.
+  unfold uint128_to_val, limb64.
   simpl Z.of_nat.
   simpl Z.mul.
   rewrite Z.div_1_r.
 
   (* hi limb of (v/2^64) is 0 since v < 2^128 *)
   do 3 f_equal.
-  rewrite Z.div_small.
-  - (* 0 = 0 mod 2 ^ 64 *)
-    reflexivity.
-  - (* 0 <= v / 2 ^ 64 < 2 ^ 64 *)
-    split.
-    + apply Z.div_pos; lia.
-    + apply Z.div_lt_upper_bound; lia.
+  rewrite Z.div_small; [reflexivity|].
+  split; [apply Z.div_pos; rep_lia | apply Z.div_lt_upper_bound; rep_lia].
 Qed.

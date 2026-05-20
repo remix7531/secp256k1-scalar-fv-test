@@ -137,17 +137,8 @@ Proof.
   unfold uint64_to_val in *.
   set (av := u64_val a) in *.
   set (bv := u64_val b) in *.
-  assert (Hav : 0 <= av <= Int64.max_unsigned).
-  { subst av.
-    destruct a as [v [Ha_lo Ha_hi]].
-    simpl.
-    rep_lia. }
-
-  assert (Hbv : 0 <= bv <= Int64.max_unsigned).
-  { subst bv.
-    destruct b as [v [Hb_lo Hb_hi]].
-    simpl.
-    rep_lia. }
+  assert (Hav : 0 <= av <= Int64.max_unsigned) by (subst av; rep_lia).
+  assert (Hbv : 0 <= bv <= Int64.max_unsigned) by (subst bv; rep_lia).
 
   (* Local tactic: normalise Int.unsigned_repr_eq and shift-by-32 *)
   Ltac norm_shru :=
@@ -192,17 +183,13 @@ Proof.
   assert (Ha_hi : 0 <= a_hi <= Int.max_unsigned).
   { subst a_hi.
     split; [apply Z.div_pos; rep_lia|].
-    unfold Int.max_unsigned.
-    enough (av / Int.modulus < Int.modulus) by lia.
-    apply Z.div_lt_upper_bound.
-    all: rep_lia. }
+    enough (av / Int.modulus < Int.modulus) by rep_lia.
+    apply Z.div_lt_upper_bound; rep_lia. }
   assert (Hb_hi : 0 <= b_hi <= Int.max_unsigned).
   { subst b_hi.
     split; [apply Z.div_pos; rep_lia|].
-    unfold Int.max_unsigned.
-    enough (bv / Int.modulus < Int.modulus) by lia.
-    apply Z.div_lt_upper_bound.
-    all: rep_lia. }
+    enough (bv / Int.modulus < Int.modulus) by rep_lia.
+    apply Z.div_lt_upper_bound; rep_lia. }
 
   (* _mid34 = (ll >> 32) + (uint32_t)lh + (uint32_t)hl *)
   forward.

@@ -17,26 +17,26 @@ Require Export scalar_4x64.Helper_verif.
 
 Ltac forward_call_muladd acc_ptr acc a b acc' Hacc' :=
   forward_call (acc_ptr, acc, a, b, Tsh);
-  [.. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_muladd_fast acc_ptr acc a b acc' Hacc' :=
   forward_call (acc_ptr, acc, a, b, Tsh);
-  [.. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_sumadd acc_ptr acc a acc' Hacc' :=
   forward_call (acc_ptr, acc, a, Tsh);
-  [.. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 Ltac forward_call_sumadd_fast acc_ptr acc a acc' Hacc' :=
   forward_call (acc_ptr, acc, a, Tsh);
-  [.. | Intros acc'; rename H into Hacc'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros acc'; rename H into Hacc'; try deadvars!].
 
 (** Extract helpers (extract, extract_fast).
     Returns a [(UInt64 * Acc)] pair that is destructured. *)
 
 Ltac forward_call_extract acc_ptr acc n_ptr sh sh_n lo carry Hlo Hcarry :=
   forward_call (acc_ptr, acc, n_ptr, sh, sh_n);
-  [.. | let vret := fresh "vret" in
+  [ try (simpl; rep_lia) .. | let vret := fresh "vret" in
         Intros vret; destruct vret as [lo carry];
         rename H into Hlo; rename H0 into Hcarry;
         simpl fst in *; simpl snd in *;
@@ -44,7 +44,7 @@ Ltac forward_call_extract acc_ptr acc n_ptr sh sh_n lo carry Hlo Hcarry :=
 
 Ltac forward_call_extract_fast acc_ptr acc n_ptr sh sh_n lo carry Hlo Hcarry :=
   forward_call (acc_ptr, acc, n_ptr, sh, sh_n);
-  [.. | let vret := fresh "vret" in
+  [ try (simpl; rep_lia) .. | let vret := fresh "vret" in
         Intros vret; destruct vret as [lo carry];
         rename H into Hlo; rename H0 into Hcarry;
         simpl fst in *; simpl snd in *;
@@ -54,31 +54,31 @@ Ltac forward_call_extract_fast acc_ptr acc n_ptr sh sh_n lo carry Hlo Hcarry :=
 
 Ltac forward_call_u128_mul r_ptr a b sh r Hr :=
   forward_call (r_ptr, a, b, sh);
-  [.. | Intros r; rename H into Hr; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r; rename H into Hr; try deadvars!].
 
 Ltac forward_call_u128_from_u64 r_ptr a sh r Hr :=
   forward_call (r_ptr, a, sh);
-  [.. | Intros r; rename H into Hr; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r; rename H into Hr; try deadvars!].
 
 Ltac forward_call_u128_accum_u64 r_ptr r a sh r' Hr' :=
   forward_call (r_ptr, r, a, sh);
-  [.. | Intros r'; rename H into Hr'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r'; rename H into Hr'; try deadvars!].
 
 Ltac forward_call_u128_accum_mul r_ptr r a b sh r' Hr' :=
   forward_call (r_ptr, r, a, b, sh);
-  [.. | Intros r'; rename H into Hr'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r'; rename H into Hr'; try deadvars!].
 
 Ltac forward_call_u128_to_u64 a_ptr x sh r Hr :=
   forward_call (a_ptr, x, sh);
-  [.. | Intros r; rename H into Hr; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r; rename H into Hr; try deadvars!].
 
 Ltac forward_call_u128_hi_u64 a_ptr x sh r Hr :=
   forward_call (a_ptr, x, sh);
-  [.. | Intros r; rename H into Hr; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r; rename H into Hr; try deadvars!].
 
 Ltac forward_call_u128_rshift r_ptr r sh r' Hr' :=
   forward_call (r_ptr, r, 64, sh);
-  [.. | Intros r'; rename H into Hr'; try deadvars!].
+  [ try (simpl; rep_lia) .. | Intros r'; rename H into Hr'; try deadvars!].
 
 (** umul128: compute a*b, return lo, write hi to *hi_ptr. *)
 

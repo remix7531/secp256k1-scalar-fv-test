@@ -44,9 +44,6 @@ Proof.
   entailer!.
 
   (* --- Postcondition: C struct = acc_to_val of mathematical sum --- *)
-  pose proof (acc_range acc) as Hacc.
-  pose proof (u64_range a) as Ha.
-  pose proof (u64_range b) as Hb.
   unfold acc_to_val, acc_muladd, u128_lo, u128_hi, mul_64.
   apply derives_refl'.
   simpl.
@@ -54,11 +51,11 @@ Proof.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
     apply eqm_of_mod_eq.
-    apply limb_add_0; lia.
+    apply limb_add_0; rep_lia.
   + (* limb 1 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    apply muladd_limb1; lia.
+    apply muladd_limb1; rep_lia.
   + (* limb 2: acc + a*b < 2^128 so limb 2 is 0 on both sides *)
     f_equal.
     apply Int64.eqm_samerepr.
@@ -66,6 +63,6 @@ Proof.
     simpl Z.of_nat.
     unfold Int64.eqm.
     replace Int64.modulus with (2^64) by reflexivity.
-    rewrite !Z.div_small by lia.
+    rewrite !Z.div_small by rep_lia.
     apply Zbits.eqmod_refl.
 Qed.

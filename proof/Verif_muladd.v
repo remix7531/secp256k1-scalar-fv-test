@@ -49,9 +49,6 @@ Proof.
   entailer!.
 
   (* --- Postcondition: C struct = acc_to_val of mathematical sum --- *)
-  pose proof (acc_range acc) as Hacc.
-  pose proof (u64_range a) as Ha.
-  pose proof (u64_range b) as Hb.
   unfold acc_to_val, acc_muladd, u128_lo, u128_hi, mul_64.
   apply derives_refl'.
   simpl.
@@ -59,13 +56,13 @@ Proof.
   + (* limb 0 *)
     apply Int64.eqm_samerepr.
     apply eqm_of_mod_eq.
-    apply limb_add_0; lia.
+    apply limb_add_0; rep_lia.
   + (* limb 1 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    apply muladd_limb1; lia.
+    apply muladd_limb1; rep_lia.
   + (* limb 2 *)
     f_equal.
     apply Int64.eqm_samerepr.
-    apply (muladd_limb2 (acc_val acc) (u64_val a) (u64_val b)); lia.
+    apply (muladd_limb2 (acc_val acc) (u64_val a) (u64_val b)); rep_lia.
 Qed.

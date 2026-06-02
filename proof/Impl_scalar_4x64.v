@@ -204,6 +204,57 @@ Proof.
 Qed.
 
 (* ================================================================= *)
+(** ** Spatial-predicate notation *)
+(** Shorthand for the [data_at] resources used by the internal specs
+    below. Read [kind_at sh p x] as "buffer [p] (share [sh]) holds the
+    [kind] value [x]", and [kind_at_ sh p] as "[p] holds uninitialised
+    [kind] storage". These are plain [Notation] -- definitionally equal
+    to the underlying [data_at] / [data_at_], so [forward], [forward_call],
+    [cancel], and [entailer!] see straight through them and existing
+    proofs are unaffected. Internal only: the public [Spec_scalar_4x64]
+    specs are deliberately left in explicit [data_at] form. *)
+
+Notation "'u64_at' sh p x" :=
+  (data_at sh tulong (uint64_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+Notation "'u64_at_' sh p" :=
+  (data_at_ sh tulong p)
+  (at level 20, sh at level 0, p at level 0).
+
+Notation "'u128_at' sh p x" :=
+  (data_at sh t_secp256k1_uint128 (uint128_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+Notation "'u128_at_' sh p" :=
+  (data_at_ sh t_secp256k1_uint128 p)
+  (at level 20, sh at level 0, p at level 0).
+
+Notation "'acc_at' sh p x" :=
+  (data_at sh t_secp256k1_acc (acc_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+
+Notation "'u256_at' sh p x" :=
+  (data_at sh t_secp256k1_uint256 (uint256_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+Notation "'u256_at_' sh p" :=
+  (data_at_ sh t_secp256k1_uint256 p)
+  (at level 20, sh at level 0, p at level 0).
+
+(** A reduced [Scalar] held in a [uint256] slot: same C struct, but the
+    value carries the [< N] refinement. Differs from [u256_at] only in
+    the value function ([scalar_to_val] vs [uint256_to_val]), so the two
+    never match the same term. *)
+Notation "'scalar_at' sh p x" :=
+  (data_at sh t_secp256k1_uint256 (scalar_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+
+Notation "'u512_at' sh p x" :=
+  (data_at sh (tarray tulong 8) (uint512_to_val x) p)
+  (at level 20, sh at level 0, p at level 0, x at level 0).
+Notation "'u512_at_' sh p" :=
+  (data_at_ sh (tarray tulong 8) p)
+  (at level 20, sh at level 0, p at level 0).
+
+(* ================================================================= *)
 (** ** u128 function specifications *)
 
 (** [secp256k1_u128_to_u64]: return the low 64 bits. *)
@@ -213,12 +264,12 @@ Definition secp256k1_u128_to_u64_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint128 ]
     PROP (readable_share sh)
     PARAMS (a_ptr)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val x) a_ptr)
+    SEP (u128_at sh a_ptr x)
   POST [ tulong ]
     EX r : UInt64,
     PROP (r = u128_lo x)
     RETURN (uint64_to_val r)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val x) a_ptr).
+    SEP (u128_at sh a_ptr x).
 
 (** [secp256k1_u128_hi_u64]: return the high 64 bits. *)
 Definition secp256k1_u128_hi_u64_spec : ident * funspec :=
@@ -227,12 +278,12 @@ Definition secp256k1_u128_hi_u64_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint128 ]
     PROP (readable_share sh)
     PARAMS (a_ptr)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val x) a_ptr)
+    SEP (u128_at sh a_ptr x)
   POST [ tulong ]
     EX r : UInt64,
     PROP (r = u128_hi x)
     RETURN (uint64_to_val r)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val x) a_ptr).
+    SEP (u128_at sh a_ptr x).
 
 (** [secp256k1_umul128]: compute a*b, return lo, write hi to [*hi]. *)
 Definition secp256k1_umul128_spec : ident * funspec :=
@@ -241,12 +292,12 @@ Definition secp256k1_umul128_spec : ident * funspec :=
   PRE [ tulong, tulong, tptr tulong ]
     PROP (writable_share sh)
     PARAMS (uint64_to_val a; uint64_to_val b; hi_ptr)
-    SEP (data_at_ sh tulong hi_ptr)
+    SEP (u64_at_ sh hi_ptr)
   POST [ tulong ]
     EX result : UInt128,
     PROP (result = mul_64 a b)
     RETURN (uint64_to_val (u128_lo result))
-    SEP (data_at sh tulong (uint64_to_val (u128_hi result)) hi_ptr).
+    SEP (u64_at sh hi_ptr (u128_hi result)).
 
 (** [secp256k1_u128_mul]: store a*b into uint128 struct [*r]. *)
 Definition secp256k1_u128_mul_spec : ident * funspec :=
@@ -255,12 +306,12 @@ Definition secp256k1_u128_mul_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint128, tulong, tulong ]
     PROP (writable_share sh)
     PARAMS (r_ptr; uint64_to_val a; uint64_to_val b)
-    SEP (data_at_ sh t_secp256k1_uint128 r_ptr)
+    SEP (u128_at_ sh r_ptr)
   POST [ tvoid ]
     EX r : UInt128,
     PROP (r = mul_64 a b)
     RETURN ()
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r) r_ptr).
+    SEP (u128_at sh r_ptr r).
 
 (* ================================================================= *)
 (** ** Accumulator function specifications *)
@@ -273,12 +324,12 @@ Definition muladd_spec : ident * funspec :=
     PROP (writable_share sh;
           acc_val acc + Z.mul (u64_val a) (u64_val b) < 2^192)
     PARAMS (acc_ptr; uint64_to_val a; uint64_to_val b)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr)
+    SEP (acc_at sh acc_ptr acc)
   POST [ tvoid ]
     EX acc' : Acc,
     PROP (acc_val acc' = Z.add (acc_val acc) (Z.mul (u64_val a) (u64_val b)))
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr).
+    SEP (acc_at sh acc_ptr acc').
 
 (** [muladd_fast]: add a*b to (c0,c1). c1 must never overflow. *)
 Definition muladd_fast_spec : ident * funspec :=
@@ -288,12 +339,12 @@ Definition muladd_fast_spec : ident * funspec :=
     PROP (writable_share sh;
           acc_val acc + Z.mul (u64_val a) (u64_val b) < 2^128)
     PARAMS (acc_ptr; uint64_to_val a; uint64_to_val b)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr)
+    SEP (acc_at sh acc_ptr acc)
   POST [ tvoid ]
     EX acc' : Acc,
     PROP (acc_val acc' = Z.add (acc_val acc) (Z.mul (u64_val a) (u64_val b)))
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr).
+    SEP (acc_at sh acc_ptr acc').
 
 (** [sumadd]: add a to acc. c2 must never overflow. *)
 Definition sumadd_spec : ident * funspec :=
@@ -303,12 +354,12 @@ Definition sumadd_spec : ident * funspec :=
     PROP (writable_share sh;
           Z.add (acc_val acc) (u64_val a) < 2^192)
     PARAMS (acc_ptr; uint64_to_val a)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr)
+    SEP (acc_at sh acc_ptr acc)
   POST [ tvoid ]
     EX acc' : Acc,
     PROP (acc_val acc' = Z.add (acc_val acc) (u64_val a))
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr).
+    SEP (acc_at sh acc_ptr acc').
 
 (** [sumadd_fast]: add a to (c0,c1). c1 must never overflow, c2 must be zero. *)
 Definition sumadd_fast_spec : ident * funspec :=
@@ -318,12 +369,12 @@ Definition sumadd_fast_spec : ident * funspec :=
     PROP (writable_share sh;
           Z.add (acc_val acc) (u64_val a) < 2^128)
     PARAMS (acc_ptr; uint64_to_val a)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr)
+    SEP (acc_at sh acc_ptr acc)
   POST [ tvoid ]
     EX acc' : Acc,
     PROP (acc_val acc' = Z.add (acc_val acc) (u64_val a))
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr).
+    SEP (acc_at sh acc_ptr acc').
 
 (** [extract]: extract lowest 64 bits, shift acc right by 64. *)
 Definition extract_spec : ident * funspec :=
@@ -332,14 +383,12 @@ Definition extract_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_acc, tptr tulong ]
     PROP (writable_share sh; writable_share sh_n)
     PARAMS (acc_ptr; n_ptr)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr;
-         data_at_ sh_n tulong n_ptr)
+    SEP (acc_at sh acc_ptr acc; u64_at_ sh_n n_ptr)
   POST [ tvoid ]
     EX n : UInt64, EX acc' : Acc,
     PROP (n = acc_lo acc; acc_val acc' = acc_val acc / 2^64)
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr;
-         data_at sh_n tulong (uint64_to_val n) n_ptr).
+    SEP (acc_at sh acc_ptr acc'; u64_at sh_n n_ptr n).
 
 (** [extract_fast]: extract lowest 64 bits, c2 required zero. *)
 Definition extract_fast_spec : ident * funspec :=
@@ -349,14 +398,12 @@ Definition extract_fast_spec : ident * funspec :=
     PROP (writable_share sh; writable_share sh_n;
           acc_val acc < 2^128)
     PARAMS (acc_ptr; n_ptr)
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc) acc_ptr;
-         data_at_ sh_n tulong n_ptr)
+    SEP (acc_at sh acc_ptr acc; u64_at_ sh_n n_ptr)
   POST [ tvoid ]
     EX n : UInt64, EX acc' : Acc,
     PROP (n = acc_lo acc; acc_val acc' = acc_val acc / 2^64)
     RETURN ()
-    SEP (data_at sh t_secp256k1_acc (acc_to_val acc') acc_ptr;
-         data_at sh_n tulong (uint64_to_val n) n_ptr).
+    SEP (acc_at sh acc_ptr acc'; u64_at sh_n n_ptr n).
 
 (* ================================================================= *)
 (** ** Additional u128 function specifications *)
@@ -368,12 +415,12 @@ Definition secp256k1_u128_from_u64_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint128, tulong ]
     PROP (writable_share sh)
     PARAMS (r_ptr; uint64_to_val a)
-    SEP (data_at_ sh t_secp256k1_uint128 r_ptr)
+    SEP (u128_at_ sh r_ptr)
   POST [ tvoid ]
     EX r : UInt128,
     PROP (u128_val r = u64_val a)
     RETURN ()
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r) r_ptr).
+    SEP (u128_at sh r_ptr r).
 
 (** [secp256k1_u128_accum_u64]: add a 64-bit value to a 128-bit accumulator. *)
 Definition secp256k1_u128_accum_u64_spec : ident * funspec :=
@@ -383,12 +430,12 @@ Definition secp256k1_u128_accum_u64_spec : ident * funspec :=
     PROP (writable_share sh;
           Z.add (u128_val r) (u64_val a) < 2^128)
     PARAMS (r_ptr; uint64_to_val a)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r) r_ptr)
+    SEP (u128_at sh r_ptr r)
   POST [ tvoid ]
     EX r' : UInt128,
     PROP (u128_val r' = Z.add (u128_val r) (u64_val a))
     RETURN ()
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r') r_ptr).
+    SEP (u128_at sh r_ptr r').
 
 (** [secp256k1_u128_accum_mul]: add a*b to a 128-bit accumulator. *)
 Definition secp256k1_u128_accum_mul_spec : ident * funspec :=
@@ -398,12 +445,12 @@ Definition secp256k1_u128_accum_mul_spec : ident * funspec :=
     PROP (writable_share sh;
           Z.add (u128_val r) (Z.mul (u64_val a) (u64_val b)) < 2^128)
     PARAMS (r_ptr; uint64_to_val a; uint64_to_val b)
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r) r_ptr)
+    SEP (u128_at sh r_ptr r)
   POST [ tvoid ]
     EX r' : UInt128,
     PROP (u128_val r' = Z.add (u128_val r) (Z.mul (u64_val a) (u64_val b)))
     RETURN ()
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r') r_ptr).
+    SEP (u128_at sh r_ptr r').
 
 (** [secp256k1_u128_rshift]: right-shift by 64 bits. *)
 Definition secp256k1_u128_rshift_spec : ident * funspec :=
@@ -412,12 +459,12 @@ Definition secp256k1_u128_rshift_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint128, tuint ]
     PROP (writable_share sh; n = 64)
     PARAMS (r_ptr; Vint (Int.repr n))
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r) r_ptr)
+    SEP (u128_at sh r_ptr r)
   POST [ tvoid ]
     EX r' : UInt128,
     PROP (u128_val r' = Z.div (u128_val r) (2^64))
     RETURN ()
-    SEP (data_at sh t_secp256k1_uint128 (uint128_to_val r') r_ptr).
+    SEP (u128_at sh r_ptr r').
 
 (* ================================================================= *)
 (** ** secp256k1 order constants *)
@@ -462,11 +509,11 @@ Definition secp256k1_scalar_check_overflow_spec : ident * funspec :=
   PRE [ tptr t_secp256k1_uint256 ]
     PROP (readable_share sh)
     PARAMS (a_ptr)
-    SEP (data_at sh t_secp256k1_uint256 (uint256_to_val a) a_ptr)
+    SEP (u256_at sh a_ptr a)
   POST [ tint ]
     PROP ()
     RETURN (Vint (Int.repr (if Z_lt_dec (u256_val a) secp256k1_N then 0 else 1)))
-    SEP (data_at sh t_secp256k1_uint256 (uint256_to_val a) a_ptr).
+    SEP (u256_at sh a_ptr a).
 
 (** [secp256k1_scalar_reduce]: add [overflow * (2^256 - N)] to [r].
     Returns [overflow] unchanged.
@@ -481,12 +528,12 @@ Definition secp256k1_scalar_reduce_spec : ident * funspec :=
     PROP (writable_share sh;
           0 <= overflow <= 2)
     PARAMS (r_ptr; Vint (Int.repr overflow))
-    SEP (data_at sh t_secp256k1_uint256 (uint256_to_val r) r_ptr)
+    SEP (u256_at sh r_ptr r)
   POST [ tint ]
     EX r' : UInt256,
     PROP (u256_val r' = (Z.add (u256_val r) (Z.mul overflow (Z.sub (2^256) secp256k1_N))) mod 2^256)
     RETURN (Vint (Int.repr overflow))
-    SEP (data_at sh t_secp256k1_uint256 (uint256_to_val r') r_ptr).
+    SEP (u256_at sh r_ptr r').
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_mul_512 *)
@@ -505,16 +552,12 @@ Definition secp256k1_scalar_mul_512_spec : ident * funspec :=
           readable_share sh_a;
           readable_share sh_b)
     PARAMS (l8_ptr; a_ptr; b_ptr)
-    SEP (data_at_ sh_l (tarray tulong 8) l8_ptr;
-         data_at sh_a t_secp256k1_uint256 (uint256_to_val a) a_ptr;
-         data_at sh_b t_secp256k1_uint256 (uint256_to_val b) b_ptr)
+    SEP (u512_at_ sh_l l8_ptr; u256_at sh_a a_ptr a; u256_at sh_b b_ptr b)
   POST [ tvoid ]
     EX r : UInt512,
     PROP (r = mul_256 a b)
     RETURN ()
-    SEP (data_at sh_l (tarray tulong 8) (uint512_to_val r) l8_ptr;
-         data_at sh_a t_secp256k1_uint256 (uint256_to_val a) a_ptr;
-         data_at sh_b t_secp256k1_uint256 (uint256_to_val b) b_ptr).
+    SEP (u512_at sh_l l8_ptr r; u256_at sh_a a_ptr a; u256_at sh_b b_ptr b).
 
 (* ================================================================= *)
 (** ** secp256k1_scalar_reduce_512 *)
@@ -531,14 +574,12 @@ Definition secp256k1_scalar_reduce_512_spec : ident * funspec :=
     PROP (writable_share sh_r;
           readable_share sh_l)
     PARAMS (r_ptr; l_ptr)
-    SEP (data_at_ sh_r t_secp256k1_uint256 r_ptr;
-         data_at sh_l (tarray tulong 8) (uint512_to_val l) l_ptr)
+    SEP (u256_at_ sh_r r_ptr; u512_at sh_l l_ptr l)
   POST [ tvoid ]
     EX r : Scalar,
     PROP (scalar_val r = Z.modulo (u512_val l) secp256k1_N)
     RETURN ()
-    SEP (data_at sh_r t_secp256k1_uint256 (scalar_to_val r) r_ptr;
-         data_at sh_l (tarray tulong 8) (uint512_to_val l) l_ptr).
+    SEP (scalar_at sh_r r_ptr r; u512_at sh_l l_ptr l).
 
 (* ================================================================= *)
 (** ** Gprog *)
